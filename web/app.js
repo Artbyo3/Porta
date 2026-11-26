@@ -726,6 +726,8 @@ async function startPair() {
   clearInterval(pairTimer);
   document.querySelector(".overlay")?.remove();
   const status = el("p", { class: "status" }, "Waiting for the phone…");
+  const help = el("div", { class: "pair-help", hidden: true });
+  const started = Date.now();
   const close = () => { clearInterval(pairTimer); ov.remove(); };
   const ov = el("div", { class: "overlay", onclick: (e) => { if (e.target === ov) close(); } },
     el("div", { class: "dialog", role: "dialog" },
@@ -733,7 +735,7 @@ async function startPair() {
       el("p", {}, "Point the phone camera at this code. The phone must be on the same Wi-Fi. The link works once and expires in 5 minutes."),
       el("p", {}, "Saves to ", el("b", {}, placeName(folder))),
       el("img", { src: "/api/pair/qr?" + Date.now(), alt: "QR code" }),
-      el("code", {}, r.url), status,
+      el("code", {}, r.url), status, help,
       el("button", { class: "btn", "data-close": true, onclick: close }, "Close")));
   document.body.append(ov);
   pairTimer = setInterval(async () => {
@@ -750,9 +752,43 @@ async function startPair() {
       status.textContent = "This code expired. Close and start again.";
     } else {
       const left = Math.max(0, s.expires - Math.floor(Date.now() / 1000));
-      status.textContent = "Waiting for the phone… " + Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");
+      status.textContent = (s.reached ? "Phone connected. Waiting for it to send… " : "Waiting for the phone… ") + Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");
+      if (s.reached) help.hidden = true;
+      else if (help.hidden && !help.dataset.shown && Date.now() - started > PHONE_HELP_AFTER) showPhoneHelp(help, s.canAllow);
     }
   }, 1000);
+}
+
+const PHONE_HELP_AFTER = 7000;
+
+// showPhoneHelp explains what to do when no phone has reached Porta, and on Windows offers to fix it.
+// Windows ties firewall permission to the program's place on the drive, which breaks for a USB stick,
+// so Porta asks Windows (with its administrator prompt) to let phones on this network reach its port instead.
+function showPhoneHelp(help, canAllow) {
+  help.dataset.shown = "1";
+  const msg = el("p", { class: "pair-help-msg" });
+  const button = canAllow ? el("button", { class: "btn btn-primary btn-sm", onclick: async () => {
+    button.disabled = true;
+    button.textContent = "Waiting for Windows…";
+    msg.textContent = "Choose Yes in the Windows prompt. It may be behind this window.";
+    try {
+      await api("POST", "/api/allow-phones");
+      button.remove();
+      msg.textContent = "Done. Phones on this network can reach Porta now. Scan the code again, or reload the page on the phone.";
+    } catch (e) {
+      button.disabled = false;
+      button.textContent = "Try again";
+      msg.textContent = e.message;
+    }
+  } }, "Allow phone access") : null;
+  help.replaceChildren(
+    el("b", {}, "Phone not loading?"),
+    el("p", {}, "If your phone shows a blank or black page, it can't reach this computer. Check that it is on the same Wi-Fi."),
+    canAllow
+      ? el("p", {}, "On the same Wi-Fi, Windows is blocking it. This happens most when Porta runs from a USB stick. Porta can ask Windows to let phones on this network in; you only do this once on each computer.")
+      : el("p", {}, "On the same Wi-Fi, this computer's firewall is blocking it. Allow incoming connections on port 8787."),
+    button, msg);
+  help.hidden = false;
 }
 
 /* ---------------- Credentials ---------------- */
