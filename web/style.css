@@ -567,3 +567,11 @@ button.crumb:hover { background: var(--green-50); text-decoration: underline; }
 .swatch.auto { width: auto; padding: 0 10px; border-radius: 999px; background: #fff; font-size: 12px; font-weight: 600; color: var(--muted); }
 
 .task-edit { display: flex; gap: 6px; flex: 1; }
+
+/* ---------- Phone help in the scan dialog ---------- */
+.pair-help { margin: 10px 0 14px; padding: 12px 14px; text-align: left; border: 1px solid #f0c36a; border-radius: 12px; background: var(--amber-bg); }
+.pair-help p { margin: 6px 0; color: var(--text); font-size: 13.5px; }
+.pair-help .btn { margin-top: 4px; }
+.pair-help-msg:empty { display: none; }
+.pair-help-msg { font-weight: 600; }
+.overlay .dialog { max-height: 100%; overflow: auto; }

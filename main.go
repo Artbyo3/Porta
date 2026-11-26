@@ -42,6 +42,7 @@ type pairing struct {
 	folder  int64
 	expires time.Time
 	used    bool
+	reached bool // the phone loaded the scan page, so nothing on the network blocks it
 	pages   int
 	files   int
 }
@@ -162,6 +163,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET /api/search", a.authed(a.search))
 	m.HandleFunc("POST /api/pair", a.authed(a.startPair))
 	m.HandleFunc("GET /api/pair", a.authed(a.pairStatus))
+	m.HandleFunc("POST /api/allow-phones", local(http.HandlerFunc(a.allowPhones)))
 	m.HandleFunc("GET /api/pair/qr", a.authed(a.pairQR))
 	m.HandleFunc("GET /m/{token}", a.phonePage)
 	m.HandleFunc("GET /m/{token}/info", a.phoneInfo)
@@ -190,8 +192,7 @@ func (a *App) authed(h http.HandlerFunc) http.HandlerFunc {
 	return local(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		c, err := r.Cookie("porta")
-		if a.store.key == nil || err != nil || a.session == "" || subtle.ConstantTimeCompare([]byte(c.Value), []byte(a.session)) != 1 {
+		if !a.signedIn(r) {
 			fail(w, http.StatusUnauthorized, "locked")
 			return
 		}
@@ -219,12 +220,33 @@ func readJSON(r *http.Request) (Record, error) {
 	return rec, err
 }
 
+// signedIn reports whether r carries the session of the unlocked vault. The caller holds a.mu.
+func (a *App) signedIn(r *http.Request) bool {
+	c, err := r.Cookie("porta")
+	return a.store.key != nil && err == nil && a.session != "" && subtle.ConstantTimeCompare([]byte(c.Value), []byte(a.session)) == 1
+}
+
 func (a *App) state(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	c, err := r.Cookie("porta")
-	unlocked := a.store.key != nil && err == nil && a.session != "" && subtle.ConstantTimeCompare([]byte(c.Value), []byte(a.session)) == 1
-	reply(w, map[string]bool{"initialized": a.store.initialized(), "unlocked": unlocked})
+	reply(w, map[string]bool{"initialized": a.store.initialized(), "unlocked": a.signedIn(r)})
+}
+
+// allowPhones asks Windows, through its administrator prompt, to let phones on this network reach Porta.
+// It runs without holding a.mu, so Porta keeps answering while the prompt waits for an answer.
+func (a *App) allowPhones(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	ok := a.signedIn(r)
+	a.mu.Unlock()
+	if !ok {
+		fail(w, http.StatusUnauthorized, "locked")
+		return
+	}
+	if err := allowPhoneAccess(); err != nil {
+		fail(w, http.StatusConflict, err.Error())
+		return
+	}
+	reply(w, "ok")
 }
 
 // alive holds a stream open for as long as Porta runs. The page watches it to notice at once when the Porta window is closed.
@@ -778,8 +800,8 @@ func (a *App) pairStatus(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"active": false})
 		return
 	}
-	reply(w, map[string]any{"active": a.live(a.pair.token), "done": a.pair.used, "pages": a.pair.pages, "files": a.pair.files,
-		"person": a.pair.person, "url": a.pairURL(), "expires": a.pair.expires.Unix()})
+	reply(w, map[string]any{"active": a.live(a.pair.token), "done": a.pair.used, "reached": a.pair.reached, "pages": a.pair.pages, "files": a.pair.files,
+		"person": a.pair.person, "url": a.pairURL(), "expires": a.pair.expires.Unix(), "canAllow": canAllowPhones})
 }
 
 func (a *App) pairQR(w http.ResponseWriter, r *http.Request) {
@@ -810,6 +832,9 @@ func (a *App) pairQR(w http.ResponseWriter, r *http.Request) {
 func (a *App) phonePage(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	ok := a.live(r.PathValue("token"))
+	if ok {
+		a.pair.reached = true
+	}
 	a.mu.Unlock()
 	if !ok {
 		http.Error(w, "This scan link is invalid, expired or already used.", http.StatusForbidden)
