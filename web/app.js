@@ -759,7 +759,7 @@ async function startPair() {
   }, 1000);
 }
 
-const PHONE_HELP_AFTER = 15000;
+const PHONE_HELP_AFTER = 7000;
 
 // showPhoneHelp explains what to do when no phone has reached Porta, and on Windows offers to fix it.
 // Windows ties firewall permission to the program's place on the drive, which breaks for a USB stick,
