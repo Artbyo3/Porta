@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Porta</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#1f5124">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="meadow" aria-hidden="true"><video id="meadowVideo" muted loop playsinline autoplay preload="auto" hidden></video></div>
+
+<div id="gate" class="gate" hidden>
+  <form id="gateForm" class="gate-card">
+    <div class="brand brand-lg">Porta</div>
+    <p class="gate-tag">Documents, credentials and tasks for the people you help. Encrypted, on this drive.</p>
+    <p id="gateTitle" class="gate-title"></p>
+    <input type="password" id="pw" placeholder="Master password" autocomplete="current-password" required>
+    <input type="password" id="pw2" placeholder="Repeat password" autocomplete="new-password" hidden>
+    <button id="gateBtn" class="btn btn-primary btn-block"></button>
+    <p id="gateMsg" class="gate-msg" role="alert"></p>
+  </form>
+</div>
+
+<div id="main" class="app" hidden>
+  <header class="appbar">
+    <div class="brand">Porta</div>
+    <div class="search">
+      <input type="search" id="q" placeholder="Search everyone: people, documents, categories, credentials   ( / )" autocomplete="off">
+      <div id="hits" class="search-results" hidden></div>
+    </div>
+    <button id="lockBtn" class="btn btn-ghost-light">Lock</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar panel">
+      <div class="sidebar-head">
+        <h2>People <span id="peopleCount" class="count"></span></h2>
+        <button id="newPersonBtn" class="btn btn-primary btn-sm">+ New</button>
+      </div>
+      <form id="addPerson" class="add-person" hidden>
+        <input id="newName" placeholder="Full name" required>
+        <button class="btn btn-primary btn-sm">Add</button>
+      </form>
+      <input id="peopleFilter" class="filter" type="search" placeholder="Filter people">
+      <ul id="people" class="people"></ul>
+    </aside>
+    <main id="workspace" class="workspace"></main>
+  </div>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

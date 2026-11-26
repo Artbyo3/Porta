@@ -1,0 +1,7 @@
+# START.sh must keep LF endings or Linux cannot run it; keep all text LF for identical builds on every OS.
+* text=auto eol=lf
+*.webm binary
+*.mp4 binary
+*.jpg binary
+*.png binary
+*.ico binary

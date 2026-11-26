@@ -1,0 +1,19 @@
+# Build output (contains a local vault when run from there)
+dist/
+
+# Encrypted vaults: user data, never source
+Porta-Data/
+
+# Binaries
+*.exe
+*.exe~
+porta-linux
+porta-linux~
+
+# Local leftovers
+*.stackdump
+scratch/
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini

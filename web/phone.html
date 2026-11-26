@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Porta Scan</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#1f5124">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="phone-body">
+<div class="meadow" aria-hidden="true"><video id="meadowVideo" muted loop playsinline autoplay hidden></video></div>
+<header class="phone-head">
+  <div class="brand">Porta Scan</div>
+  <p id="who">Connecting…</p>
+</header>
+
+<main id="home" class="phone-main">
+  <div class="phone-actions">
+    <button class="btn btn-primary wide" id="camBtn">Scan a page</button>
+    <button class="btn" id="photosBtn">Add photos</button>
+    <button class="btn" id="filesBtn">Add files</button>
+  </div>
+  <input type="file" id="cam" accept="image/*" capture="environment" class="hidden-input">
+  <input type="file" id="photos" accept="image/*" multiple class="hidden-input">
+  <input type="file" id="files" multiple class="hidden-input">
+  <div id="pagesBox"></div>
+  <div id="filesBox"></div>
+</main>
+
+<main id="sendView" class="phone-main" hidden>
+  <h2 style="margin:4px 0 14px">Save to Porta</h2>
+  <form id="sendForm">
+    <label class="field" id="titleField"><span>Title of the scanned document</span><input id="title"></label>
+    <label class="field"><span>Category</span><select id="category"></select></label>
+    <label class="field"><span>Document date (optional)</span><input id="docDate" placeholder="e.g. 2019 or 2019-04-12" pattern="\d{4}(-\d{2}(-\d{2})?)?"></label>
+    <p id="summary" class="count"></p>
+  </form>
+</main>
+
+<main id="doneView" class="phone-main" hidden>
+  <div class="sent"><h2>Sent</h2><p id="doneMsg"></p><p class="count">You can close this page.</p></div>
+</main>
+
+<div class="sticky-bar" id="bar">
+  <button class="btn" id="backBtn" hidden>Back</button>
+  <button class="btn btn-primary" id="nextBtn" disabled>Continue</button>
+</div>
+
+<div class="editor" id="editor" hidden>
+  <div class="editor-top"><b id="edTitle">Page</b><button class="btn btn-sm btn-ghost-light" id="edDelete">Delete page</button></div>
+  <div class="editor-stage" id="stage">
+    <canvas id="edCanvas"></canvas>
+    <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div><div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
+    <div class="busy" id="busy" hidden>Working…</div>
+  </div>
+  <div class="editor-tools">
+    <button class="btn btn-sm" id="edAuto">Auto edges</button>
+    <button class="btn btn-sm" id="edFull">Whole photo</button>
+    <button class="btn btn-sm" id="edRotate">Rotate</button>
+  </div>
+  <div class="editor-tools" id="modes">
+    <button class="btn btn-sm" data-mode="color">Color</button>
+    <button class="btn btn-sm" data-mode="gray">Gray</button>
+    <button class="btn btn-sm" data-mode="bw">B&amp;W document</button>
+  </div>
+  <div class="editor-bottom">
+    <button class="btn" id="edCancel">Cancel</button>
+    <button class="btn btn-primary" id="edDone">Done</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const CATEGORIES = ["Unsorted", "Identity", "Tax", "Income", "Bank", "Housing", "Medical", "Insurance", "Legal", "Immigration", "Education", "Utilities", "Vehicle", "Other"];
+const MAX_SRC = 2400, MAX_OUT = 2200;
+const pages = [];   // { src: canvas, corners: [[x,y]x4], mode, blob, url }
+const files = [];   // File
+let view = "home";
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (v != null) e.setAttribute(k, v);
+  }
+  e.append(...kids);
+  return e;
+}
+const PATHS = { left: "M15 18l-6-6 6-6", right: "M9 18l6-6-6-6", remove: "M6 6l12 12M18 6L6 18" };
+function icon(name) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(k, v);
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", PATHS[name]);
+  svg.append(path);
+  return svg;
+}
+const fmtSize = (n) => n < 1048576 ? Math.max(1, Math.round(n / 1024)) + " KB" : (n / 1048576).toFixed(1) + " MB";
+
+// The grass video plays behind the page when the phone allows it; otherwise its first frame shows as a still.
+(() => {
+  const v = $("meadowVideo");
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || navigator.connection?.saveData) return;
+  v.addEventListener("error", () => { v.hidden = true; });
+  v.addEventListener("playing", () => { v.hidden = false; });
+  v.poster = "/media/grass.jpg";
+  v.src = v.canPlayType('video/webm; codecs="vp9"') ? "/media/grass.webm" : "/media/grass.mp4";
+  v.play().catch(() => { v.hidden = true; });
+})();
+
+fetch(location.pathname + "/info").then((r) => r.ok ? r.json() : Promise.reject()).then((i) => {
+  $("who").textContent = "Saving for " + i.person;
+}).catch(() => { $("who").textContent = "This link is no longer valid."; });
+
+/* ---------- Image processing ---------- */
+async function loadSource(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const s = Math.min(1, MAX_SRC / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * s);
+    c.height = Math.round(img.naturalHeight * s);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    return c;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function orderCorners(pts) {
+  const by = (f) => pts.reduce((a, b) => (f(b) < f(a) ? b : a));
+  return [by((p) => p[0] + p[1]), by((p) => p[1] - p[0]), by((p) => -(p[0] + p[1])), by((p) => p[0] - p[1])];
+}
+
+function fullCorners(c) { return [[0, 0], [c.width, 0], [c.width, c.height], [0, c.height]]; }
+
+// Finds the largest bright region (the paper) and returns its four extreme corners.
+function detectCorners(src) {
+  const s = Math.min(1, 360 / Math.max(src.width, src.height));
+  const w = Math.max(8, Math.round(src.width * s)), h = Math.max(8, Math.round(src.height * s));
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.filter = "blur(2px)";
+  ctx.drawImage(src, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const g = new Uint8Array(w * h), hist = new Array(256).fill(0);
+  for (let i = 0; i < w * h; i++) { const v = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8; g[i] = v; hist[v]++; }
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, best = 0, t = 128;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i]; if (!wB) continue;
+    const wF = w * h - wB; if (!wF) break;
+    sumB += i * hist[i];
+    const mB = sumB / wB, mF = (sum - sumB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > best) { best = v; t = i; }
+  }
+  const seen = new Uint8Array(w * h);
+  let bestPix = null;
+  for (let start = 0; start < w * h; start++) {
+    if (seen[start] || g[start] <= t) continue;
+    const stack = [start], pix = []; seen[start] = 1;
+    while (stack.length) {
+      const p = stack.pop(); pix.push(p);
+      const x = p % w, y = (p - x) / w;
+      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1]) {
+        if (q >= 0 && !seen[q] && g[q] > t) { seen[q] = 1; stack.push(q); }
+      }
+    }
+    if (!bestPix || pix.length > bestPix.length) bestPix = pix;
+  }
+  const area = bestPix ? bestPix.length / (w * h) : 0;
+  if (area < 0.12 || area > 0.985) return fullCorners(src);
+  const pts = bestPix.map((p) => [p % w, Math.floor(p / w)]);
+  return orderCorners(pts).map(([x, y]) => [x / s, y / s]);
+}
+
+// Maps the quad in src onto a flat rectangle (perspective correction), then applies the color mode.
+function renderPage(p) {
+  const [tl, tr, br, bl] = p.corners;
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  let W = Math.max(dist(tl, tr), dist(bl, br)), H = Math.max(dist(tl, bl), dist(tr, br));
+  const k = Math.min(1, MAX_OUT / Math.max(W, H)); W = Math.max(1, Math.round(W * k)); H = Math.max(1, Math.round(H * k));
+  const [x0, y0] = tl, [x1, y1] = tr, [x2, y2] = br, [x3, y3] = bl;
+  const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3, dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+  let a, b, c, d, e, f, gg = 0, hh = 0;
+  if (Math.abs(dx3) < 1e-9 && Math.abs(dy3) < 1e-9) {
+    a = x1 - x0; b = x2 - x1; c = x0; d = y1 - y0; e = y2 - y1; f = y0;
+  } else {
+    const den = dx1 * dy2 - dx2 * dy1;
+    gg = (dx3 * dy2 - dx2 * dy3) / den; hh = (dx1 * dy3 - dx3 * dy1) / den;
+    a = x1 - x0 + gg * x1; b = x3 - x0 + hh * x3; c = x0; d = y1 - y0 + gg * y1; e = y3 - y0 + hh * y3; f = y0;
+  }
+  const sw = p.src.width, sh = p.src.height;
+  const sd = p.src.getContext("2d").getImageData(0, 0, sw, sh).data;
+  const out = document.createElement("canvas"); out.width = W; out.height = H;
+  const octx = out.getContext("2d");
+  const img = octx.createImageData(W, H), od = img.data;
+  for (let j = 0; j < H; j++) {
+    const v = (j + 0.5) / H;
+    for (let i = 0; i < W; i++) {
+      const u = (i + 0.5) / W, z = gg * u + hh * v + 1;
+      let x = (a * u + b * v + c) / z - 0.5, y = (d * u + e * v + f) / z - 0.5;
+      if (x < 0) x = 0; if (y < 0) y = 0; if (x > sw - 1.001) x = sw - 1.001; if (y > sh - 1.001) y = sh - 1.001;
+      const xi = x | 0, yi = y | 0, fx = x - xi, fy = y - yi, o = (yi * sw + xi) * 4, q = (j * W + i) * 4;
+      for (let ch = 0; ch < 3; ch++) {
+        const top = sd[o + ch] + (sd[o + 4 + ch] - sd[o + ch]) * fx;
+        const bot = sd[o + sw * 4 + ch] + (sd[o + sw * 4 + 4 + ch] - sd[o + sw * 4 + ch]) * fx;
+        od[q + ch] = top + (bot - top) * fy;
+      }
+      od[q + 3] = 255;
+    }
+  }
+  if (p.mode !== "color") applyMode(od, W, H, p.mode);
+  octx.putImageData(img, 0, 0);
+  return out;
+}
+
+function applyMode(od, W, H, mode) {
+  const n = W * H, g = new Float32Array(n);
+  for (let i = 0; i < n; i++) g[i] = od[i * 4] * 0.299 + od[i * 4 + 1] * 0.587 + od[i * 4 + 2] * 0.114;
+  let res = g;
+  if (mode === "bw") {
+    const integ = new Float64Array((W + 1) * (H + 1));
+    for (let y = 0; y < H; y++) {
+      let row = 0;
+      for (let x = 0; x < W; x++) { row += g[y * W + x]; integ[(y + 1) * (W + 1) + x + 1] = integ[y * (W + 1) + x + 1] + row; }
+    }
+    const r = Math.max(8, Math.round(Math.max(W, H) / 60));
+    res = new Float32Array(n);
+    for (let y = 0; y < H; y++) {
+      const ya = Math.max(0, y - r), yb = Math.min(H, y + r + 1);
+      for (let x = 0; x < W; x++) {
+        const xa = Math.max(0, x - r), xb = Math.min(W, x + r + 1);
+        const mean = (integ[yb * (W + 1) + xb] - integ[ya * (W + 1) + xb] - integ[yb * (W + 1) + xa] + integ[ya * (W + 1) + xa]) / ((yb - ya) * (xb - xa));
+        const v = g[y * W + x], ratio = v / (mean + 1);
+        res[y * W + x] = ratio > 0.92 ? 255 : Math.max(0, 255 * (ratio - 0.55) / 0.37);
+      }
+    }
+  }
+  for (let i = 0; i < n; i++) od[i * 4] = od[i * 4 + 1] = od[i * 4 + 2] = res[i];
+}
+
+function rotateSource(p) {
+  const s = p.src, c = document.createElement("canvas");
+  c.width = s.height; c.height = s.width;
+  const ctx = c.getContext("2d");
+  ctx.translate(c.width, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(s, 0, 0);
+  p.corners = orderCorners(p.corners.map(([x, y]) => [s.height - y, x]));
+  p.src = c;
+}
+
+/* ---------- Editor ---------- */
+let ed = null; // { page, isNew, scale }
+
+function openEditor(p, isNew) {
+  ed = { page: p, isNew, orig: { src: p.src, corners: p.corners.map((c) => c.slice()), mode: p.mode } };
+  $("edTitle").textContent = isNew ? "Adjust the edges" : "Page " + (pages.indexOf(p) + 1);
+  $("editor").hidden = false;
+  document.body.style.overflow = "hidden";
+  drawEditor();
+}
+
+function drawEditor() {
+  const p = ed.page, stage = $("stage"), cv = $("edCanvas");
+  const s = Math.min((stage.clientWidth - 28) / p.src.width, (stage.clientHeight - 28) / p.src.height);
+  ed.scale = s;
+  cv.width = Math.round(p.src.width * s); cv.height = Math.round(p.src.height * s);
+  const ctx = cv.getContext("2d");
+  ctx.drawImage(p.src, 0, 0, cv.width, cv.height);
+  ctx.fillStyle = "rgba(0,0,0,.45)";
+  ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height);
+  const q = p.corners.map(([x, y]) => [x * s, y * s]);
+  ctx.moveTo(q[0][0], q[0][1]); for (const pt of [q[3], q[2], q[1]]) ctx.lineTo(pt[0], pt[1]); ctx.closePath();
+  ctx.fill("evenodd");
+  ctx.strokeStyle = "#a7e06b"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(q[0][0], q[0][1]); for (const pt of [q[1], q[2], q[3]]) ctx.lineTo(pt[0], pt[1]); ctx.closePath(); ctx.stroke();
+  const ox = cv.offsetLeft, oy = cv.offsetTop;
+  document.querySelectorAll(".handle").forEach((hd) => {
+    const [x, y] = q[+hd.dataset.i];
+    hd.style.left = ox + x + "px"; hd.style.top = oy + y + "px";
+  });
+  document.querySelectorAll("#modes .btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === p.mode));
+}
+
+document.querySelectorAll(".handle").forEach((hd) => {
+  hd.addEventListener("pointerdown", (e) => { hd.setPointerCapture(e.pointerId); e.preventDefault(); });
+  hd.addEventListener("pointermove", (e) => {
+    if (!hd.hasPointerCapture(e.pointerId)) return;
+    const cv = $("edCanvas"), r = cv.getBoundingClientRect(), p = ed.page;
+    const x = Math.min(Math.max(0, (e.clientX - r.left) / ed.scale), p.src.width);
+    const y = Math.min(Math.max(0, (e.clientY - r.top) / ed.scale), p.src.height);
+    p.corners[+hd.dataset.i] = [x, y];
+    drawEditor();
+  });
+});
+window.addEventListener("resize", () => { if (ed) drawEditor(); });
+
+$("edAuto").onclick = () => { ed.page.corners = detectCorners(ed.page.src); drawEditor(); };
+$("edFull").onclick = () => { ed.page.corners = fullCorners(ed.page.src); drawEditor(); };
+$("edRotate").onclick = () => { rotateSource(ed.page); drawEditor(); };
+document.querySelectorAll("#modes .btn").forEach((b) => b.onclick = () => { ed.page.mode = b.dataset.mode; drawEditor(); });
+
+function closeEditor() { ed = null; $("editor").hidden = true; document.body.style.overflow = ""; render(); }
+
+$("edCancel").onclick = () => {
+  if (ed.isNew) pages.splice(pages.indexOf(ed.page), 1);
+  else Object.assign(ed.page, ed.orig);
+  closeEditor();
+};
+$("edDelete").onclick = () => { const p = ed.page; pages.splice(pages.indexOf(p), 1); if (p.url) URL.revokeObjectURL(p.url); closeEditor(); };
+$("edDone").onclick = async () => {
+  $("busy").hidden = false;
+  await new Promise((r) => setTimeout(r, 30));
+  const p = ed.page;
+  const out = renderPage(p);
+  p.blob = await new Promise((ok) => out.toBlob(ok, "image/jpeg", 0.85));
+  if (p.url) URL.revokeObjectURL(p.url);
+  p.url = URL.createObjectURL(p.blob);
+  $("busy").hidden = true;
+  closeEditor();
+};
+
+/* ---------- Adding pages and files ---------- */
+async function addImages(list, edit) {
+  for (const f of list) {
+    try {
+      const src = await loadSource(f);
+      const p = { src, corners: detectCorners(src), mode: "color", blob: null, url: null };
+      pages.push(p);
+      if (edit) { openEditor(p, true); return; }
+      p.blob = await new Promise((ok) => renderPage(p).toBlob(ok, "image/jpeg", 0.85));
+      p.url = URL.createObjectURL(p.blob);
+    } catch (e) { alert("Could not read " + f.name); }
+  }
+  render();
+}
+
+$("camBtn").onclick = () => $("cam").click();
+$("photosBtn").onclick = () => $("photos").click();
+$("filesBtn").onclick = () => $("files").click();
+$("cam").onchange = async () => { const l = [...$("cam").files]; $("cam").value = ""; await addImages(l, true); };
+$("photos").onchange = async () => { const l = [...$("photos").files]; $("photos").value = ""; await addImages(l, false); };
+$("files").onchange = () => { files.push(...$("files").files); $("files").value = ""; render(); };
+
+function move(i, d) {
+  const j = i + d;
+  if (j < 0 || j >= pages.length) return;
+  [pages[i], pages[j]] = [pages[j], pages[i]];
+  render();
+}
+
+function render() {
+  const ready = pages.filter((p) => p.blob);
+  $("pagesBox").replaceChildren(...(pages.length ? [
+    el("h3", { class: "section-title" }, "Scanned pages: one PDF, in this order"),
+    el("div", { class: "thumbs" }, ...pages.map((p, i) => el("div", { class: "thumb" },
+      el("div", { class: "img", onclick: () => openEditor(p, false) }, p.url ? el("img", { src: p.url, alt: "Page " + (i + 1) }) : "", el("span", { class: "num" }, String(i + 1))),
+      el("div", { class: "ctrls" },
+        el("button", { "aria-label": "Move earlier", onclick: () => move(i, -1) }, icon("left")),
+        el("button", { "aria-label": "Delete page", onclick: () => { pages.splice(i, 1); if (p.url) URL.revokeObjectURL(p.url); render(); } }, icon("remove")),
+        el("button", { "aria-label": "Move later", onclick: () => move(i, 1) }, icon("right")))))),
+    el("p", { class: "count" }, "Tap a page to crop, rotate or change color.")
+  ] : !files.length ? [el("p", { class: "phone-empty" }, "Scan each page of a document. Porta flattens and crops it, then combines all pages into one PDF. You can also add existing files from this phone.")] : []));
+  $("filesBox").replaceChildren(...(files.length ? [
+    el("h3", { class: "section-title" }, "Files, each saved as it is"),
+    el("ul", { class: "files" }, ...files.map((f, i) => el("li", {}, el("span", {}, f.name), el("small", { class: "count" }, fmtSize(f.size)),
+      el("button", { class: "btn btn-sm btn-danger", "aria-label": "Remove file", onclick: () => { files.splice(i, 1); render(); } }, icon("remove")))))
+  ] : []));
+  const n = ready.length;
+  $("nextBtn").disabled = !n && !files.length;
+  $("nextBtn").textContent = view === "send" ? "Send to Porta" : "Continue" + (n || files.length ? " (" + [n ? n + " page" + (n > 1 ? "s" : "") : "", files.length ? files.length + " file" + (files.length > 1 ? "s" : "") : ""].filter(Boolean).join(", ") + ")" : "");
+}
+
+/* ---------- Sending ---------- */
+for (const c of CATEGORIES) $("category").append(el("option", { value: c }, c));
+$("title").value = "Scan " + new Date().toISOString().slice(0, 10);
+
+function show(v) {
+  view = v;
+  $("home").hidden = v !== "home"; $("sendView").hidden = v !== "send"; $("doneView").hidden = v !== "done";
+  $("backBtn").hidden = v !== "send"; $("bar").hidden = v === "done";
+  render();
+  window.scrollTo(0, 0);
+}
+
+$("backBtn").onclick = () => show("home");
+$("nextBtn").onclick = async () => {
+  if (view === "home") {
+    const n = pages.filter((p) => p.blob).length;
+    $("titleField").hidden = !n;
+    $("summary").textContent = [n ? n + " page(s) will become one PDF." : "", files.length ? files.length + " file(s) will be saved as they are, with this category and date." : ""].join(" ");
+    return show("send");
+  }
+  if (!$("sendForm").reportValidity()) return;
+  $("nextBtn").disabled = true; $("nextBtn").textContent = "Sending…";
+  const fd = new FormData();
+  fd.append("meta", JSON.stringify({ title: $("title").value.trim(), category: $("category").value, date: $("docDate").value.trim() }));
+  pages.filter((p) => p.blob).forEach((p, i) => fd.append("page", p.blob, "page" + (i + 1) + ".jpg"));
+  files.forEach((f) => fd.append("file", f, f.name));
+  try {
+    const res = await fetch(location.pathname, { method: "POST", body: fd });
+    if (!res.ok) throw new Error(await res.text());
+    const r = await res.json();
+    $("doneMsg").textContent = [r.pages ? "1 PDF with " + r.pages + " page" + (r.pages > 1 ? "s" : "") : "", r.files ? r.files + " file" + (r.files > 1 ? "s" : "") : ""].filter(Boolean).join(" and ") + " saved.";
+    show("done");
+  } catch (e) {
+    alert("Sending failed: " + e.message);
+    render();
+  }
+};
+render();
+</script>
+</body>
+</html>
