@@ -17,11 +17,15 @@ import (
 
 // fields lists, per table, the record keys a client may set. A doc's name, type, size and blob are set by the server only.
 var fields = map[string][]string{
-	"people": {"name", "notes", "icon", "color"},
-	"creds":  {"label", "url", "username", "password", "notes"},
-	"tasks":  {"text", "done"},
-	"docs":   {"title", "category", "date", "notes"},
+	"people":  {"name", "notes", "icon", "color"},
+	"folders": {"name", "parent"},
+	"creds":   {"label", "url", "username", "password", "notes"},
+	"tasks":   {"text", "done"},
+	"docs":    {"title", "folder", "date", "notes"},
 }
+
+// idFields hold a record id; 0 means none (a folder at the top level, a document outside any folder).
+var idFields = map[string]bool{"parent": true, "folder": true}
 
 var errWrongPassword = errors.New("wrong password")
 
@@ -42,6 +46,7 @@ func openStore(dir string) (*Store, error) {
 	_, err = db.Exec(`
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS people(id INTEGER PRIMARY KEY, person INTEGER NOT NULL, data BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS folders(id INTEGER PRIMARY KEY, person INTEGER NOT NULL, data BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS docs(id INTEGER PRIMARY KEY, person INTEGER NOT NULL, data BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS creds(id INTEGER PRIMARY KEY, person INTEGER NOT NULL, data BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY, person INTEGER NOT NULL, data BLOB NOT NULL);`)
@@ -201,8 +206,13 @@ func (s *Store) remove(table string, id int64) error {
 			os.Remove(s.blobPath(str(rec["blob"])))
 		}
 	}
+	if table == "folders" {
+		if err := s.removeFolderContents(id); err != nil {
+			return err
+		}
+	}
 	if table == "people" {
-		for _, t := range []string{"docs", "creds", "tasks"} {
+		for _, t := range []string{"docs", "folders", "creds", "tasks"} {
 			recs, err := s.list(t, id)
 			if err != nil {
 				return err
@@ -216,6 +226,75 @@ func (s *Store) remove(table string, id int64) error {
 	}
 	_, err := s.db.Exec(`DELETE FROM `+table+` WHERE id=?`, id)
 	return err
+}
+
+// removeFolderContents deletes the documents and subfolders inside a folder, at every depth.
+func (s *Store) removeFolderContents(id int64) error {
+	folder, err := s.get("folders", id)
+	if err != nil {
+		return nil
+	}
+	person := toID(folder["person"])
+	for _, t := range []string{"docs", "folders"} {
+		key := map[string]string{"docs": "folder", "folders": "parent"}[t]
+		recs, err := s.list(t, person)
+		if err != nil {
+			return err
+		}
+		for _, r := range recs {
+			if toID(r[key]) == id {
+				if err := s.remove(t, toID(r["id"])); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// migrateCategories turns each document category from older versions into a top-level folder of the same name.
+// Documents that were Unsorted stay at the top level. It only touches documents that still carry a category.
+func (s *Store) migrateCategories() error {
+	docs, err := s.list("docs", -1)
+	if err != nil {
+		return err
+	}
+	folders, err := s.list("folders", -1)
+	if err != nil {
+		return err
+	}
+	type key struct {
+		person int64
+		name   string
+	}
+	top := map[key]int64{}
+	for _, f := range folders {
+		if toID(f["parent"]) == 0 {
+			top[key{toID(f["person"]), str(f["name"])}] = toID(f["id"])
+		}
+	}
+	for _, d := range docs {
+		cat, ok := d["category"]
+		if !ok {
+			continue
+		}
+		delete(d, "category")
+		person := toID(d["person"])
+		d["folder"] = int64(0)
+		if name := str(cat); name != "" && name != "Unsorted" {
+			k := key{person, name}
+			if top[k] == 0 {
+				if top[k], err = s.put("folders", 0, person, Record{"name": name, "parent": int64(0)}); err != nil {
+					return err
+				}
+			}
+			d["folder"] = top[k]
+		}
+		if _, err := s.put("docs", toID(d["id"]), person, d); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) blobPath(name string) string {

@@ -39,6 +39,7 @@ const (
 type pairing struct {
 	token   string
 	person  int64
+	folder  int64
 	expires time.Time
 	used    bool
 	pages   int
@@ -98,9 +99,7 @@ func run() error {
 		return err
 	}
 	url := "http://127.0.0.1:" + port
-	fmt.Println("Porta is running at " + url)
-	fmt.Println("Data folder: " + dir)
-	fmt.Println("Close this window to quit.")
+	banner(url, dir)
 	if os.Getenv("PORTA_NO_BROWSER") == "" {
 		openBrowser(url)
 	}
@@ -262,6 +261,11 @@ func (a *App) unlock(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusUnauthorized, "wrong password")
 			return
 		}
+		if err := a.store.migrateCategories(); err != nil {
+			a.store.lock()
+			fail(w, http.StatusInternalServerError, "could not upgrade documents to folders: "+err.Error())
+			return
+		}
 	} else if err := (&Store{db: a.store.db}).unlock(str(rec["password"])); err != nil {
 		fail(w, http.StatusUnauthorized, "wrong password")
 		return
@@ -285,6 +289,8 @@ func clean(table string, in Record) Record {
 		if f == "done" {
 			b, _ := v.(bool)
 			out[f] = b
+		} else if idFields[f] {
+			out[f] = toID(v)
 		} else {
 			out[f] = str(v)
 		}
@@ -297,18 +303,89 @@ func (a *App) personExists(id int64) bool {
 	return err == nil
 }
 
+// folderIn reports whether folder is 0 (the top level) or one of person's folders.
+func (a *App) folderIn(person, folder int64) bool {
+	if folder == 0 {
+		return true
+	}
+	f, err := a.store.get("folders", folder)
+	return err == nil && toID(f["person"]) == person
+}
+
+// placeFolder checks that a folder named name may sit under parent. id is the folder being renamed or moved, 0 for a new one.
+func (a *App) placeFolder(person, id, parent int64, name string) error {
+	if name == "" {
+		return errors.New("folder name required")
+	}
+	folders, err := a.store.list("folders", person)
+	if err != nil {
+		return err
+	}
+	byID := map[int64]Record{}
+	for _, f := range folders {
+		byID[toID(f["id"])] = f
+	}
+	if parent != 0 && byID[parent] == nil {
+		return errors.New("no such folder")
+	}
+	for p := parent; p != 0; p = toID(byID[p]["parent"]) {
+		if p == id {
+			return errors.New("a folder cannot go inside itself")
+		}
+	}
+	for _, f := range folders {
+		if toID(f["id"]) != id && toID(f["parent"]) == parent && strings.EqualFold(str(f["name"]), name) {
+			return fmt.Errorf("there is already a folder named %q here", name)
+		}
+	}
+	return nil
+}
+
+// folderPaths maps each folder of person (of everyone when -1) to its path from the top level, such as "Tax / 2024".
+func (a *App) folderPaths(person int64) (map[int64]string, error) {
+	folders, err := a.store.list("folders", person)
+	if err != nil {
+		return nil, err
+	}
+	byID := map[int64]Record{}
+	for _, f := range folders {
+		byID[toID(f["id"])] = f
+	}
+	paths := map[int64]string{}
+	var path func(id int64) string
+	path = func(id int64) string {
+		f := byID[id]
+		if f == nil {
+			return ""
+		}
+		if p, ok := paths[id]; ok {
+			return p
+		}
+		p := str(f["name"])
+		if parent := path(toID(f["parent"])); parent != "" {
+			p = parent + " / " + p
+		}
+		paths[id] = p
+		return p
+	}
+	for id := range byID {
+		path(id)
+	}
+	return paths, nil
+}
+
 func (a *App) listPeople(w http.ResponseWriter, r *http.Request) {
 	recs, err := a.store.list("people", 0)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	type counts struct{ docs, unsorted, creds, openTasks int }
+	type counts struct{ docs, folders, creds, openTasks int }
 	byID := map[int64]*counts{}
 	for _, p := range recs {
 		byID[toID(p["id"])] = &counts{}
 	}
-	for _, kind := range []string{"docs", "creds", "tasks"} {
+	for _, kind := range []string{"docs", "folders", "creds", "tasks"} {
 		children, err := a.store.list(kind, -1)
 		if err != nil {
 			fail(w, http.StatusInternalServerError, err.Error())
@@ -322,9 +399,8 @@ func (a *App) listPeople(w http.ResponseWriter, r *http.Request) {
 			switch kind {
 			case "docs":
 				n.docs++
-				if cat := str(c["category"]); cat == "" || cat == unsorted {
-					n.unsorted++
-				}
+			case "folders":
+				n.folders++
 			case "creds":
 				n.creds++
 			case "tasks":
@@ -336,7 +412,7 @@ func (a *App) listPeople(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, p := range recs {
 		n := byID[toID(p["id"])]
-		p["docs"], p["unsorted"], p["creds"], p["openTasks"] = n.docs, n.unsorted, n.creds, n.openTasks
+		p["docs"], p["folders"], p["creds"], p["openTasks"] = n.docs, n.folders, n.creds, n.openTasks
 	}
 	reply(w, recs)
 }
@@ -357,7 +433,7 @@ func (a *App) addPerson(w http.ResponseWriter, r *http.Request) {
 
 func childKind(w http.ResponseWriter, r *http.Request) (string, bool) {
 	kind := r.PathValue("kind")
-	if kind != "docs" && kind != "creds" && kind != "tasks" {
+	if kind != "docs" && kind != "folders" && kind != "creds" && kind != "tasks" {
 		http.NotFound(w, r)
 		return "", false
 	}
@@ -392,15 +468,21 @@ func (a *App) addChild(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	id, err := a.store.put(kind, 0, person, clean(kind, rec))
+	rec = clean(kind, rec)
+	if kind == "folders" {
+		rec["name"] = strings.TrimSpace(str(rec["name"]))
+		if err := a.placeFolder(person, 0, toID(rec["parent"]), str(rec["name"])); err != nil {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	id, err := a.store.put(kind, 0, person, rec)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	reply(w, map[string]int64{"id": id})
 }
-
-const unsorted = "Unsorted"
 
 // inlineTypes are the only types the browser may render; every other file is served as a download.
 var inlineTypes = map[string]bool{
@@ -455,6 +537,7 @@ func cleanName(name string) string {
 }
 
 // saveDoc stores data as a new document. meta holds the client-settable fields; missing ones get defaults.
+// The caller checks that meta's folder belongs to person.
 func (a *App) saveDoc(person int64, name string, data []byte, meta Record) (int64, error) {
 	blob, err := a.store.writeBlob(data)
 	if err != nil {
@@ -464,9 +547,7 @@ func (a *App) saveDoc(person int64, name string, data []byte, meta Record) (int6
 	if strings.TrimSpace(str(rec["title"])) == "" {
 		rec["title"] = strings.TrimSuffix(name, filepath.Ext(name))
 	}
-	if strings.TrimSpace(str(rec["category"])) == "" {
-		rec["category"] = unsorted
-	}
+	rec["folder"] = toID(rec["folder"])
 	rec["name"], rec["mime"], rec["size"], rec["created"], rec["blob"] = name, fileType(name, data), len(data), time.Now().Unix(), blob
 	return a.store.put("docs", 0, person, rec)
 }
@@ -475,12 +556,17 @@ func (a *App) addDoc(w http.ResponseWriter, r *http.Request) {
 	person := pathID(r)
 	q := r.URL.Query()
 	name := cleanName(q.Get("name"))
+	folder, _ := strconv.ParseInt(q.Get("folder"), 10, 64)
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxUpload))
 	if err != nil || !a.personExists(person) || len(data) == 0 || name == "" {
 		fail(w, http.StatusBadRequest, "empty or unreadable file")
 		return
 	}
-	id, err := a.saveDoc(person, name, data, Record{"title": q.Get("title"), "category": q.Get("category"), "date": q.Get("date")})
+	if !a.folderIn(person, folder) {
+		fail(w, http.StatusBadRequest, "no such folder")
+		return
+	}
+	id, err := a.saveDoc(person, name, data, Record{"title": q.Get("title"), "folder": folder, "date": q.Get("date")})
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -540,6 +626,20 @@ func (a *App) update(w http.ResponseWriter, r *http.Request) {
 	for k, v := range clean(kind, in) {
 		cur[k] = v
 	}
+	person := toID(cur["person"])
+	switch kind {
+	case "docs":
+		if !a.folderIn(person, toID(cur["folder"])) {
+			fail(w, http.StatusBadRequest, "no such folder")
+			return
+		}
+	case "folders":
+		cur["name"] = strings.TrimSpace(str(cur["name"]))
+		if err := a.placeFolder(person, id, toID(cur["parent"]), str(cur["name"])); err != nil {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if _, err := a.store.put(kind, id, 0, cur); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -568,6 +668,7 @@ func (a *App) search(w http.ResponseWriter, r *http.Request) {
 		Detail string `json:"detail"`
 		ID     int64  `json:"id"`
 		Person int64  `json:"person"`
+		Folder int64  `json:"folder"`
 	}
 	hits := []hit{}
 	if q == "" {
@@ -579,8 +680,14 @@ func (a *App) search(w http.ResponseWriter, r *http.Request) {
 		match        []string
 	}{
 		{"people", "name", []string{"name", "notes"}},
-		{"docs", "title", []string{"title", "name", "category", "notes", "date"}},
+		{"folders", "name", []string{"name"}},
+		{"docs", "title", []string{"title", "name", "notes", "date"}},
 		{"creds", "label", []string{"label", "url"}},
+	}
+	paths, err := a.folderPaths(-1)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	for _, sr := range searched {
 		recs, err := a.store.list(sr.table, -1)
@@ -597,8 +704,13 @@ func (a *App) search(w http.ResponseWriter, r *http.Request) {
 				if sr.table == "people" {
 					h.Person = h.ID
 				}
-				if sr.table == "docs" {
-					h.Detail = strings.TrimSpace(str(rec["category"]) + " " + str(rec["date"]))
+				switch sr.table {
+				case "docs":
+					h.Folder = toID(rec["folder"])
+					h.Detail = strings.TrimSpace(paths[h.Folder] + "  " + str(rec["date"]))
+				case "folders":
+					h.Folder = h.ID
+					h.Detail = paths[toID(rec["parent"])]
 				}
 				hits = append(hits, h)
 				break
@@ -627,12 +739,16 @@ func (a *App) pairURL() string { return "http://" + lanIP() + ":" + port + "/m/"
 
 func (a *App) startPair(w http.ResponseWriter, r *http.Request) {
 	rec, err := readJSON(r)
-	person := toID(rec["person"])
+	person, folder := toID(rec["person"]), toID(rec["folder"])
 	if err != nil || !a.personExists(person) {
 		fail(w, http.StatusBadRequest, "select a person first")
 		return
 	}
-	a.pair = &pairing{token: randHex(16), person: person, expires: time.Now().Add(pairLife)}
+	if !a.folderIn(person, folder) {
+		fail(w, http.StatusBadRequest, "no such folder")
+		return
+	}
+	a.pair = &pairing{token: randHex(16), person: person, folder: folder, expires: time.Now().Add(pairLife)}
 	reply(w, map[string]string{"url": a.pairURL()})
 }
 
@@ -701,7 +817,12 @@ func (a *App) phoneInfo(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	reply(w, map[string]string{"person": str(p["name"])})
+	paths, err := a.folderPaths(a.pair.person)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	reply(w, map[string]string{"person": str(p["name"]), "folder": paths[a.pair.folder]})
 }
 
 type upload struct {
@@ -735,6 +856,14 @@ func (a *App) phoneSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "This scan link is invalid, expired or already used.", http.StatusForbidden)
 		return
 	}
+	// The person or folder may have been deleted on the computer since the link was made.
+	if !a.personExists(a.pair.person) {
+		http.Error(w, "This person was deleted in Porta. Start a new scan from the computer.", http.StatusGone)
+		return
+	}
+	if !a.folderIn(a.pair.person, a.pair.folder) {
+		a.pair.folder = 0
+	}
 	if len(up.pages) > 0 {
 		pdf, err := jpegsToPDF(up.pages)
 		if err != nil {
@@ -746,7 +875,7 @@ func (a *App) phoneSend(w http.ResponseWriter, r *http.Request) {
 			title = "Scan " + time.Now().Format("2006-01-02 15-04-05")
 		}
 		meta := clean("docs", up.meta)
-		meta["title"] = title
+		meta["title"], meta["folder"] = title, a.pair.folder
 		if _, err := a.saveDoc(a.pair.person, title+".pdf", pdf, meta); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -755,6 +884,7 @@ func (a *App) phoneSend(w http.ResponseWriter, r *http.Request) {
 	for _, f := range up.files {
 		meta := clean("docs", up.meta)
 		delete(meta, "title")
+		meta["folder"] = a.pair.folder
 		if _, err := a.saveDoc(a.pair.person, f.name, f.data, meta); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
