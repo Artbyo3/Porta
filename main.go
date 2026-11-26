@@ -52,6 +52,7 @@ type App struct {
 	session    string
 	lastActive time.Time
 	pair       *pairing
+	web        assets
 }
 
 func main() {
@@ -93,7 +94,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	app := &App{store: store}
+	static, _ := fs.Sub(webFS, "web")
+	web, err := loadAssets(static)
+	if err != nil {
+		return err
+	}
+	app := &App{store: store, web: web}
 	ln, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		return err
@@ -133,12 +139,11 @@ func (a *App) lockLocked() {
 
 func (a *App) routes() http.Handler {
 	m := http.NewServeMux()
-	static, _ := fs.Sub(webFS, "web")
-	m.Handle("GET /", local(http.FileServerFS(static)))
-	m.Handle("GET /style.css", http.FileServerFS(static))
-	m.Handle("GET /favicon.ico", http.FileServerFS(static))
-	m.Handle("GET /apple-touch-icon.png", http.FileServerFS(static))
-	m.Handle("GET /media/{file}", http.FileServerFS(static))
+	// The phone may load only the style, icons and media; every other file is for this computer only.
+	m.Handle("GET /", local(http.HandlerFunc(a.web.handler)))
+	for _, p := range []string{"GET /style.css", "GET /favicon.ico", "GET /apple-touch-icon.png", "GET /media/{file}"} {
+		m.HandleFunc(p, a.web.handler)
+	}
 	m.HandleFunc("GET /api/state", local(http.HandlerFunc(a.state)))
 	m.HandleFunc("GET /api/alive", local(http.HandlerFunc(alive)))
 	m.HandleFunc("POST /api/setup", local(http.HandlerFunc(a.setup)))
@@ -810,9 +815,7 @@ func (a *App) phonePage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "This scan link is invalid, expired or already used.", http.StatusForbidden)
 		return
 	}
-	page, _ := webFS.ReadFile("web/phone.html")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(page)
+	a.web["/phone.html"].serve(w, r, false)
 }
 
 func (a *App) phoneInfo(w http.ResponseWriter, r *http.Request) {

@@ -122,8 +122,12 @@ function startMeadow() {
   v.poster = "/media/grass.jpg";
   v.hidden = false;
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  v.src = v.canPlayType('video/webm; codecs="vp9"') ? "/media/grass.webm" : "/media/grass.mp4";
-  v.play().catch(() => {});
+  // The video starts after the page has loaded, so it never delays it; until then the still frame shows.
+  const play = () => {
+    v.src = v.canPlayType('video/webm; codecs="vp9"') ? "/media/grass.webm" : "/media/grass.mp4";
+    v.play().catch(() => {});
+  };
+  if (document.readyState === "complete") play(); else addEventListener("load", play, { once: true });
 }
 
 /* ---------------- Lock screen ---------------- */
