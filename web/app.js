@@ -426,6 +426,87 @@ function dropInto(target) {
   };
 }
 
+/* ---------------- Selecting and scrolling ---------------- */
+let lastPicked = null; // the document whose checkbox was clicked last, where a Shift-click range starts
+
+// selectRange selects every listed document between two of them, inclusive, in the order shown.
+function selectRange(fromId, toId) {
+  const ids = [...document.querySelectorAll(".docs-list .doc-row")].map((r) => Number(r.dataset.id));
+  const a = ids.indexOf(fromId), b = ids.indexOf(toId);
+  if (a < 0 || b < 0) return;
+  for (const id of ids.slice(Math.min(a, b), Math.max(a, b) + 1)) S.selected.add(id);
+}
+
+// scrollerOf returns what actually scrolls around the document list: the list itself, or on narrow screens the panel.
+const scrollerOf = (list) => list.scrollHeight > list.clientHeight + 1 ? list : list.closest(".tab-body") || list;
+
+// edgeScroll scrolls the list when y is near or past its top or bottom edge, faster the closer it gets.
+function edgeScroll(list, y) {
+  const sc = scrollerOf(list), r = sc.getBoundingClientRect(), zone = Math.min(70, r.height / 4);
+  let d = 0;
+  if (y < r.top + zone) d = -(r.top + zone - y);
+  else if (y > r.bottom - zone) d = y - (r.bottom - zone);
+  d = Math.max(-28, Math.min(28, Math.round(d / zone * 22)));
+  if (d) sc.scrollTop += d;
+}
+
+// boxSelect lets a drag that starts on an empty part of the document list draw a box: every document row it
+// touches is selected. Ctrl or Shift adds to the current selection. Near the list's edges it scrolls.
+// A click on empty space without dragging clears the selection.
+function boxSelect(e, list, during, end) {
+  if (e.button !== 0 || e.target.closest(".doc-row, .folder-row, .folder-form, button, input, select, a, .quick")) return;
+  const lr = list.getBoundingClientRect();
+  if (e.clientX - lr.left >= list.clientWidth) return; // the scrollbar
+  e.preventDefault();
+  const keep = e.ctrlKey || e.metaKey || e.shiftKey;
+  const base = keep ? new Set(S.selected) : new Set();
+  const at = (x, y) => { const r = list.getBoundingClientRect(); return { x: x - r.left + list.scrollLeft, y: y - r.top + list.scrollTop }; };
+  const origin = at(e.clientX, e.clientY);
+  let pointer = { x: e.clientX, y: e.clientY }, box = null;
+  const update = () => {
+    const cur = at(pointer.x, pointer.y);
+    if (!box) {
+      if (Math.abs(cur.x - origin.x) + Math.abs(cur.y - origin.y) < 6) return;
+      box = el("div", { class: "select-box" });
+      list.append(box);
+    }
+    const x1 = Math.min(origin.x, cur.x), y1 = Math.min(origin.y, cur.y), x2 = Math.max(origin.x, cur.x), y2 = Math.max(origin.y, cur.y);
+    Object.assign(box.style, { left: x1 + "px", top: y1 + "px", width: x2 - x1 + "px", height: y2 - y1 + "px" });
+    S.selected.clear();
+    for (const id of base) S.selected.add(id);
+    for (const row of list.querySelectorAll(".doc-row")) {
+      const rr = row.getBoundingClientRect(), p = at(rr.left, rr.top), id = Number(row.dataset.id);
+      if (p.x < x2 && p.x + rr.width > x1 && p.y < y2 && p.y + rr.height > y1) S.selected.add(id);
+      const on = S.selected.has(id);
+      row.classList.toggle("selected", on);
+      row.querySelector("input").checked = on;
+    }
+    during();
+  };
+  const tick = setInterval(() => { if (box) { edgeScroll(list, pointer.y); update(); } }, 30);
+  const move = (ev) => { pointer = { x: ev.clientX, y: ev.clientY }; update(); };
+  const up = () => {
+    clearInterval(tick);
+    removeEventListener("mousemove", move);
+    if (box) box.remove();
+    else if (!keep && S.selected.size) S.selected.clear();
+    end();
+  };
+  addEventListener("mousemove", move);
+  addEventListener("mouseup", up, { once: true });
+}
+
+// While documents or folders are dragged inside Porta, holding them near the list's top or bottom edge scrolls it.
+let dragY = null, dragTick = null;
+document.addEventListener("dragstart", (e) => {
+  if (!e.target.closest?.(".doc-row, .folder-row")) return;
+  clearInterval(dragTick);
+  dragTick = setInterval(() => { const list = document.querySelector(".docs-list"); if (list && dragY != null) edgeScroll(list, dragY); }, 30);
+});
+document.addEventListener("dragover", (e) => { dragY = e.clientY; });
+document.addEventListener("dragend", () => { clearInterval(dragTick); dragY = null; });
+document.addEventListener("drop", () => { clearInterval(dragTick); dragY = null; });
+
 /* ---------------- Documents ---------------- */
 // filteredDocs returns the documents of the open folder, or, while searching, matching documents from every folder.
 function filteredDocs() {
@@ -487,7 +568,7 @@ function renderDocs(body) {
 
   const listBox = el("div", { class: "docs-list" });
   const detailBox = el("div", { class: "detail-slot" });
-  const bulk = el("div");
+  const bulk = el("div", { class: "bulk-slot" });
 
   function renderBulk() {
     if (!S.selected.size) { bulk.replaceChildren(); return; }
@@ -552,11 +633,16 @@ function renderDocs(body) {
 
   function docRow(d, showPath) {
     const [label, cls] = typeOf(d);
-    return el("div", { class: "doc-row" + (S.openDoc === d.id ? " open" : ""), "data-id": d.id, draggable: "true",
+    return el("div", { class: "doc-row" + (S.openDoc === d.id ? " open" : "") + (S.selected.has(d.id) ? " selected" : ""), "data-id": d.id, draggable: "true",
       ondragstart: (e) => dragItems(e, { docs: S.selected.has(d.id) ? [...S.selected] : [d.id] }),
       onclick: () => { S.openDoc = d.id; renderList(); } },
-      el("input", { type: "checkbox", checked: S.selected.has(d.id), "aria-label": "Select", onclick: (e) => e.stopPropagation(),
-        onchange: (e) => { e.target.checked ? S.selected.add(d.id) : S.selected.delete(d.id); renderBulk(); } }),
+      el("input", { type: "checkbox", checked: S.selected.has(d.id), "aria-label": "Select",
+        onclick: (e) => {
+          e.stopPropagation();
+          if (e.shiftKey && lastPicked != null && lastPicked !== d.id) { e.preventDefault(); selectRange(lastPicked, d.id); renderList(); }
+          lastPicked = d.id;
+        },
+        onchange: (e) => { e.target.checked ? S.selected.add(d.id) : S.selected.delete(d.id); e.target.closest(".doc-row").classList.toggle("selected", e.target.checked); renderBulk(); } }),
       el("span", { class: "type " + cls }, label),
       el("div", { style: "min-width:0" }, el("div", { class: "doc-title" }, d.title || d.name),
         el("div", { class: "doc-sub" }, showPath ? "In " + placeName(d.folder) : d.name + (d.notes ? " · " + d.notes : ""))),
@@ -608,6 +694,7 @@ function renderDocs(body) {
 
   body.replaceChildren(crumbs, toolbar, bulk, el("div", { class: "docs-split" }, listBox, detailBox));
   renderList();
+  listBox.addEventListener("mousedown", (e) => boxSelect(e, listBox, renderBulk, renderList));
 
   body.classList.add("docs-drop");
   body.dataset.dropLabel = "Drop files to add them to " + (S.folder ? folderOf(S.folder).name : p.name);
@@ -962,6 +1049,9 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "/" && !$("main").hidden && !typing && !viewer) { e.preventDefault(); $("q").focus(); }
   if (e.key === "Backspace" && !typing && !$("main").hidden && S.tab === "docs" && S.folder && !document.querySelector(".overlay")) { e.preventDefault(); openFolder(folderOf(S.folder).parent); }
   if (e.key === "Escape") { $("hits").hidden = true; document.querySelector(".overlay [data-close]")?.click(); }
+  const inDocs = !typing && !$("main").hidden && S.tab === "docs" && !document.querySelector(".overlay");
+  if (inDocs && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") { e.preventDefault(); for (const d of filteredDocs()) S.selected.add(d.id); renderWorkspace(); }
+  if (inDocs && e.key === "Escape" && S.selected.size) { S.selected.clear(); renderWorkspace(); }
 });
 
 boot();
