@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body class="phone-body">
-<div class="meadow" aria-hidden="true"><video id="meadowVideo" muted loop playsinline autoplay hidden></video></div>
+<div class="meadow" aria-hidden="true"></div>
 <header class="phone-head">
   <div class="brand">Porta Scan</div>
   <p id="who">Connecting…</p>
@@ -98,22 +98,10 @@ function icon(name) {
 }
 const fmtSize = (n) => n < 1048576 ? Math.max(1, Math.round(n / 1024)) + " KB" : (n / 1048576).toFixed(1) + " MB";
 
-const linkChecked = fetch(location.pathname + "/info").then((r) => r.ok ? r.json() : Promise.reject()).then((i) => {
+// The phone shows the grass as a still image (the .meadow background) to save data; only the computer plays the video.
+fetch(location.pathname + "/info").then((r) => r.ok ? r.json() : Promise.reject()).then((i) => {
   $("who").textContent = "Saving for " + i.person + (i.folder ? " in " + i.folder : "");
 }).catch(() => { $("who").textContent = "This link is no longer valid."; });
-
-// The grass video plays behind the page when the phone allows it; until then, and otherwise, its first frame shows as a still.
-// It starts only after the page and the link check are done, so on a slow connection it never delays them.
-const pageLoaded = new Promise((done) => document.readyState === "complete" ? done() : addEventListener("load", done, { once: true }));
-Promise.all([pageLoaded, linkChecked]).then(() => {
-  const v = $("meadowVideo");
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches || navigator.connection?.saveData) return;
-  v.addEventListener("error", () => { v.hidden = true; });
-  v.addEventListener("playing", () => { v.hidden = false; });
-  v.poster = "/media/grass.jpg";
-  v.src = v.canPlayType('video/webm; codecs="vp9"') ? "/media/grass.webm" : "/media/grass.mp4";
-  v.play().catch(() => { v.hidden = true; });
-});
 
 /* ---------- Image processing ---------- */
 async function loadSource(file) {
