@@ -140,6 +140,7 @@ func (a *App) routes() http.Handler {
 	m.Handle("GET /apple-touch-icon.png", http.FileServerFS(static))
 	m.Handle("GET /media/{file}", http.FileServerFS(static))
 	m.HandleFunc("GET /api/state", local(http.HandlerFunc(a.state)))
+	m.HandleFunc("GET /api/alive", local(http.HandlerFunc(alive)))
 	m.HandleFunc("POST /api/setup", local(http.HandlerFunc(a.setup)))
 	m.HandleFunc("POST /api/unlock", local(http.HandlerFunc(a.unlock)))
 	m.HandleFunc("POST /api/lock", a.authed(func(w http.ResponseWriter, r *http.Request) { a.lockLocked(); reply(w, "ok") }))
@@ -219,6 +220,15 @@ func (a *App) state(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie("porta")
 	unlocked := a.store.key != nil && err == nil && a.session != "" && subtle.ConstantTimeCompare([]byte(c.Value), []byte(a.session)) == 1
 	reply(w, map[string]bool{"initialized": a.store.initialized(), "unlocked": unlocked})
+}
+
+// alive holds a stream open for as long as Porta runs. The page watches it to notice at once when the Porta window is closed.
+func alive(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, ": porta\n\n")
+	http.NewResponseController(w).Flush()
+	<-r.Context().Done()
 }
 
 func (a *App) startSession(w http.ResponseWriter) {

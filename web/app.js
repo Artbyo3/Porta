@@ -127,8 +127,47 @@ function startMeadow() {
 }
 
 /* ---------------- Lock screen ---------------- */
+/* ---------------- Connection to the Porta program ---------------- */
+const portaUp = () => fetch("/api/state", { headers: { "X-Porta-Poll": "1" } }).then((r) => r.ok, () => false);
+
+// watchAlive keeps a stream open to Porta. Closing the Porta window drops it at once.
+function watchAlive() {
+  const es = new EventSource("/api/alive");
+  es.onerror = async () => {
+    es.close();
+    if (await portaUp()) setTimeout(watchAlive, 1000);
+    else showStopped();
+  };
+}
+
+// showStopped hides everything the page showed (the vault is locked once Porta is gone), says what happened,
+// and reloads by itself when Porta runs again.
+function showStopped() {
+  clearInterval(pairTimer);
+  document.querySelectorAll(".overlay").forEach((o) => o.remove());
+  Object.assign(S, { people: [], person: null, docs: [], folders: [], creds: [], tasks: [], openDoc: null });
+  S.selected.clear();
+  $("workspace").replaceChildren(); $("people").replaceChildren();
+  $("main").hidden = true; $("gate").hidden = true;
+  const status = el("p", { class: "status" }, "Waiting for Porta to start again…");
+  document.body.append(el("div", { class: "overlay stopped", role: "alertdialog", "aria-labelledby": "stoppedTitle" },
+    el("div", { class: "dialog" },
+      el("div", { class: "brand brand-lg" }, "Porta"),
+      el("h2", { id: "stoppedTitle" }, "Porta has stopped"),
+      el("p", {}, "The Porta window on this computer was closed, so this page can no longer reach your documents. Your data is safe and stays encrypted on the drive."),
+      el("p", {}, "To keep working, start Porta again: double-click ", el("b", {}, "porta.exe"), ". This page reconnects by itself."),
+      status)));
+  const timer = setInterval(async () => {
+    if (!(await portaUp())) return;
+    clearInterval(timer);
+    status.textContent = "Porta is back. Reloading…";
+    location.reload();
+  }, 2000);
+}
+
 async function boot() {
   startMeadow();
+  watchAlive();
   const s = await api("GET", "/api/state", undefined, true);
   if (s.unlocked) showMain(); else showGate(s.initialized);
 }
