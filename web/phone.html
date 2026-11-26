@@ -33,7 +33,6 @@
   <h2 style="margin:4px 0 14px">Save to Porta</h2>
   <form id="sendForm">
     <label class="field" id="titleField"><span>Title of the scanned document</span><input id="title"></label>
-    <label class="field"><span>Category</span><select id="category"></select></label>
     <label class="field"><span>Document date (optional)</span><input id="docDate" placeholder="e.g. 2019 or 2019-04-12" pattern="\d{4}(-\d{2}(-\d{2})?)?"></label>
     <p id="summary" class="count"></p>
   </form>
@@ -74,7 +73,6 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const CATEGORIES = ["Unsorted", "Identity", "Tax", "Income", "Bank", "Housing", "Medical", "Insurance", "Legal", "Immigration", "Education", "Utilities", "Vehicle", "Other"];
 const MAX_SRC = 2400, MAX_OUT = 2200;
 const pages = [];   // { src: canvas, corners: [[x,y]x4], mode, blob, url }
 const files = [];   // File
@@ -112,7 +110,7 @@ const fmtSize = (n) => n < 1048576 ? Math.max(1, Math.round(n / 1024)) + " KB" :
 })();
 
 fetch(location.pathname + "/info").then((r) => r.ok ? r.json() : Promise.reject()).then((i) => {
-  $("who").textContent = "Saving for " + i.person;
+  $("who").textContent = "Saving for " + i.person + (i.folder ? " in " + i.folder : "");
 }).catch(() => { $("who").textContent = "This link is no longer valid."; });
 
 /* ---------- Image processing ---------- */
@@ -376,7 +374,6 @@ function render() {
 }
 
 /* ---------- Sending ---------- */
-for (const c of CATEGORIES) $("category").append(el("option", { value: c }, c));
 $("title").value = "Scan " + new Date().toISOString().slice(0, 10);
 
 function show(v) {
@@ -392,13 +389,13 @@ $("nextBtn").onclick = async () => {
   if (view === "home") {
     const n = pages.filter((p) => p.blob).length;
     $("titleField").hidden = !n;
-    $("summary").textContent = [n ? n + " page(s) will become one PDF." : "", files.length ? files.length + " file(s) will be saved as they are, with this category and date." : ""].join(" ");
+    $("summary").textContent = [n ? n + " page(s) will become one PDF." : "", files.length ? files.length + " file(s) will be saved as they are, with this date." : ""].join(" ");
     return show("send");
   }
   if (!$("sendForm").reportValidity()) return;
   $("nextBtn").disabled = true; $("nextBtn").textContent = "Sending…";
   const fd = new FormData();
-  fd.append("meta", JSON.stringify({ title: $("title").value.trim(), category: $("category").value, date: $("docDate").value.trim() }));
+  fd.append("meta", JSON.stringify({ title: $("title").value.trim(), date: $("docDate").value.trim() }));
   pages.filter((p) => p.blob).forEach((p, i) => fd.append("page", p.blob, "page" + (i + 1) + ".jpg"));
   files.forEach((f) => fd.append("file", f, f.name));
   try {

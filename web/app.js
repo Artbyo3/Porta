@@ -1,9 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const IDLE_MS = 10 * 60 * 1000;
-const UNSORTED = "Unsorted";
-const CATEGORIES = ["Identity", "Tax", "Income", "Bank", "Housing", "Medical", "Insurance", "Legal", "Immigration", "Education", "Utilities", "Vehicle", "Other"];
-const NEW_CATEGORY = "__new_category__";
+const SUGGESTED_FOLDERS = ["Identity", "Tax", "Income", "Bank", "Housing", "Medical", "Insurance", "Legal", "Immigration", "Education", "Utilities", "Vehicle"];
 const PALETTE = { green: "#37803a", teal: "#1f8a7a", blue: "#2e6fb7", purple: "#7a4fb5", pink: "#c2407a", red: "#c0392b", orange: "#d9771e", brown: "#8a6239", slate: "#5b6b7a" };
 // ICONS are 24x24 outline drawings (stroke only), rendered in the avatar's foreground color.
 const ICONS = {
@@ -22,21 +20,27 @@ const ICONS = {
   star: "M12 3l2.8 5.9 6.2.7-4.6 4.2 1.2 6.2L12 16.9 6.4 20l1.2-6.2L3 9.6l6.2-.7z",
   leaf: "M5 19c0-8 6-14 15-14 0 9-6 15-14 15M5 19l7-7",
 };
+// UI_ICONS are drawn like ICONS but are not offered as avatars.
+const UI_ICONS = {
+  folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
+};
 
 function icon(name) {
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "1.8", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(k, v);
   const path = document.createElementNS(NS, "path");
-  path.setAttribute("d", ICONS[name]);
+  path.setAttribute("d", ICONS[name] || UI_ICONS[name]);
   svg.append(path);
   return svg;
 }
 
+// folder is the open folder's id, 0 for the person's top level. lastFolder remembers it per person for this session.
 const S = {
   people: [], person: null, tab: "docs",
-  docs: [], creds: [], tasks: [],
-  f: { cat: "All", year: "All", q: "", sort: "date-desc" },
+  docs: [], folders: [], creds: [], tasks: [],
+  folder: 0, lastFolder: {}, newFolder: false, editFolder: null, draft: null,
+  f: { year: "All", q: "", sort: "date-desc" },
   selected: new Set(), openDoc: null, editCred: null,
 };
 let setupMode = false, lastInput = Date.now(), lastPing = 0, pairTimer = null;
@@ -83,7 +87,6 @@ function toast(msg, error, key) {
 const fmtSize = (n) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB";
 const fmtAdded = (s) => new Date(s * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 const yearOf = (d) => (/^\d{4}/.exec(d.date || "") || ["Undated"])[0];
-const catOf = (d) => d.category || UNSORTED;
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 
 function initials(name) {
@@ -134,7 +137,7 @@ async function showGate(initialized) {
   if (initialized === undefined) initialized = (await (await fetch("/api/state")).json()).initialized;
   clearInterval(pairTimer);
   document.querySelector(".overlay")?.remove();
-  Object.assign(S, { people: [], person: null, docs: [], creds: [], tasks: [], openDoc: null });
+  Object.assign(S, { people: [], person: null, docs: [], folders: [], creds: [], tasks: [], openDoc: null, folder: 0, lastFolder: {}, newFolder: false, editFolder: null });
   S.selected.clear();
   $("workspace").replaceChildren(); $("people").replaceChildren(); $("q").value = ""; $("hits").hidden = true;
   setupMode = !initialized;
@@ -197,8 +200,8 @@ function renderPeople() {
       avatar(p),
       el("span", { class: "who" },
         el("span", { class: "name" }, p.name),
-        el("span", { class: "meta" }, plural(p.docs, "doc"), p.unsorted ? [" · ", el("b", {}, p.unsorted + " unsorted")] : null,
-          p.openTasks ? " · " + plural(p.openTasks, "open task") : null))))));
+        el("span", { class: "meta" }, [plural(p.docs, "doc"), p.folders ? plural(p.folders, "folder") : null,
+          p.openTasks ? plural(p.openTasks, "open task") : null].filter(Boolean).join(" · ")))))));
   if (!shown.length) $("people").append(el("li", { class: "count" }, S.people.length ? "No match." : "No people yet."));
 }
 
@@ -216,8 +219,10 @@ const current = () => S.people.find((p) => p.id === S.person);
 
 async function selectPerson(id, tab) {
   if (S.person !== id) {
-    S.f = { cat: "All", year: "All", q: "", sort: S.f.sort };
-    S.selected.clear(); S.openDoc = null; S.editCred = null;
+    if (S.person != null) S.lastFolder[S.person] = S.folder;
+    S.f = { year: "All", q: "", sort: S.f.sort };
+    Object.assign(S, { folder: S.lastFolder[id] || 0, openDoc: null, editCred: null, newFolder: false, editFolder: null, docs: [], folders: [] });
+    S.selected.clear();
   }
   S.person = id;
   if (tab) S.tab = tab;
@@ -228,9 +233,10 @@ async function selectPerson(id, tab) {
 
 async function loadChildren() {
   const id = S.person;
-  const [docs, creds, tasks] = await Promise.all(["docs", "creds", "tasks"].map((k) => api("GET", "/api/people/" + id + "/" + k)));
+  const [docs, folders, creds, tasks] = await Promise.all(["docs", "folders", "creds", "tasks"].map((k) => api("GET", "/api/people/" + id + "/" + k)));
   if (S.person !== id) return;
-  Object.assign(S, { docs, creds, tasks });
+  Object.assign(S, { docs, folders, creds, tasks });
+  if (!folderOf(S.folder)) S.folder = 0;
 }
 
 async function refresh() {
@@ -249,9 +255,8 @@ function renderWorkspace() {
     return;
   }
   const open = S.tasks.filter((t) => !t.done).length;
-  const unsortedN = S.docs.filter((d) => catOf(d) === UNSORTED).length;
-  const tab = (key, label, n, warn) => el("button", { class: S.tab === key ? "active" : null, onclick: () => { S.tab = key; renderWorkspace(); } },
-    label, n != null ? el("span", { class: "badge" + (warn ? " warn" : "") }, String(n)) : null);
+  const tab = (key, label, n) => el("button", { class: S.tab === key ? "active" : null, onclick: () => { S.tab = key; renderWorkspace(); } },
+    label, n != null ? el("span", { class: "badge" }, String(n)) : null);
   const body = el("section", { class: "panel tab-body", id: "tabBody" });
   $("workspace").replaceChildren(
     el("section", { class: "panel person-head" },
@@ -259,20 +264,132 @@ function renderWorkspace() {
         avatar(p, "lg"),
         el("div", { class: "grow" },
           el("h1", {}, p.name),
-          el("p", { class: "person-sub" }, [plural(S.docs.length, "document"), unsortedN ? unsortedN + " unsorted" : null, plural(S.creds.length, "credential"), plural(open, "open task")].filter(Boolean).join(" · "))),
+          el("p", { class: "person-sub" }, [plural(S.docs.length, "document"), plural(S.folders.length, "folder"), plural(S.creds.length, "credential"), plural(open, "open task")].join(" · "))),
         el("button", { class: "btn btn-sm", id: "editPersonBtn", onclick: () => { S.tab = "profile"; renderWorkspace(); document.querySelector("#profileName")?.focus(); } }, "Edit person")),
-      el("nav", { class: "tabs" }, tab("docs", "Documents", S.docs.length, false), tab("creds", "Credentials", S.creds.length), tab("tasks", "Tasks", open, false), tab("profile", "Profile"))),
+      el("nav", { class: "tabs" }, tab("docs", "Documents", S.docs.length), tab("creds", "Credentials", S.creds.length), tab("tasks", "Tasks", open), tab("profile", "Profile"))),
     body);
   ({ docs: renderDocs, creds: renderCreds, tasks: renderTasks, profile: renderProfile })[S.tab](body);
 }
 
+/* ---------------- Folders ---------------- */
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+const folderOf = (id) => S.folders.find((f) => f.id === id);
+const subfolders = (id) => S.folders.filter((f) => f.parent === id).sort(byName);
+
+// trail lists the folders from the top level down to id.
+function trail(id) {
+  const out = [];
+  for (let f = folderOf(id); f; f = folderOf(f.parent)) out.unshift(f);
+  return out;
+}
+
+const folderName = (id) => id ? folderOf(id)?.name || "" : "the top level";
+const placeName = (id) => [current()?.name, ...trail(id).map((f) => f.name)].join(" / ");
+
+// deepCount counts the documents and folders inside a folder, at every depth.
+function deepCount(id) {
+  let docs = S.docs.filter((d) => d.folder === id).length, folders = 0;
+  for (const f of subfolders(id)) {
+    const c = deepCount(f.id);
+    docs += c.docs; folders += 1 + c.folders;
+  }
+  return { docs, folders };
+}
+
+const countText = ({ docs, folders }) => [folders ? plural(folders, "folder") : null, docs ? plural(docs, "document") : null].filter(Boolean).join(" · ") || "Empty";
+
+// folderOptions lists every place a document or folder can go, in tree order. skip leaves out a folder and everything inside it.
+function folderOptions(selected, skip) {
+  const out = [el("option", { value: 0, selected: selected === 0 }, "Top level of " + current().name)];
+  const walk = (parent, depth) => {
+    for (const f of subfolders(parent)) {
+      if (f.id === skip) continue;
+      out.push(el("option", { value: f.id, selected: selected === f.id }, "   ".repeat(depth) + f.name));
+      walk(f.id, depth + 1);
+    }
+  };
+  walk(0, 1);
+  return out;
+}
+
+function openFolder(id) {
+  Object.assign(S, { folder: folderOf(id) ? id : 0, openDoc: null, editFolder: null, newFolder: false, draft: null });
+  S.f.year = "All";
+  S.f.q = "";
+  S.selected.clear();
+  renderWorkspace();
+}
+
+async function createFolder(name, parent, open) {
+  try {
+    const r = await api("POST", "/api/people/" + S.person + "/folders", { name, parent });
+    toast("Created " + name);
+    await refresh();
+    if (open) openFolder(r.id);
+    return true;
+  } catch (e) { toast(e.message, true); return false; }
+}
+
+// moveItems puts documents and folders into the target folder, then reports what moved.
+async function moveItems({ docs = [], folders = [] }, target) {
+  let moved = 0, failed = 0;
+  for (const id of docs) {
+    if (S.docs.find((d) => d.id === id)?.folder === target) continue;
+    try { await api("PUT", "/api/docs/" + id, { folder: target }); moved++; } catch (e) { failed++; toast(e.message, true); }
+  }
+  for (const id of folders) {
+    if (id === target || folderOf(id)?.parent === target) continue;
+    try { await api("PUT", "/api/folders/" + id, { parent: target }); moved++; } catch (e) { failed++; toast(e.message, true); }
+  }
+  if (moved) toast("Moved " + plural(moved, "item") + " to " + folderName(target));
+  else if (!failed) toast("Already in " + folderName(target) + ". Pick another folder to move to.");
+  S.selected.clear();
+  await refresh();
+}
+
+async function deleteFolder(f) {
+  const c = deepCount(f.id);
+  if ((c.docs || c.folders) && !confirm("Delete the folder " + f.name + " and everything in it (" + countText(c) + ")? This cannot be undone.")) return;
+  await api("DELETE", "/api/folders/" + f.id);
+  if (trail(S.folder).some((t) => t.id === f.id)) S.folder = f.parent;
+  toast("Deleted " + f.name);
+  refresh();
+}
+
+/* ---------------- Drag and drop ---------------- */
+const DRAG = "application/x-porta-items";
+
+function dragItems(e, items) {
+  e.stopPropagation();
+  e.dataTransfer.setData(DRAG, JSON.stringify(items));
+  e.dataTransfer.effectAllowed = "move";
+}
+
+// dropInto makes an element accept documents and folders dragged inside Porta, and files dropped from the computer.
+function dropInto(target) {
+  const accepts = (e) => [...e.dataTransfer.types].some((t) => t === DRAG || t === "Files");
+  return {
+    ondragover: (e) => { if (!accepts(e)) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.add("drop-on"); },
+    ondragleave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove("drop-on"); },
+    ondrop: (e) => {
+      e.preventDefault(); e.stopPropagation();
+      e.currentTarget.classList.remove("drop-on");
+      document.querySelector(".dropping")?.classList.remove("dropping");
+      const items = e.dataTransfer.getData(DRAG);
+      if (items) moveItems(JSON.parse(items), target);
+      else if (fromPorta(e.dataTransfer)) toast("That item is already in Porta", true);
+      else uploadFiles(e.dataTransfer.files, target);
+    },
+  };
+}
+
 /* ---------------- Documents ---------------- */
+// filteredDocs returns the documents of the open folder, or, while searching, matching documents from every folder.
 function filteredDocs() {
-  const q = S.f.q.toLowerCase();
+  const q = S.f.q.trim().toLowerCase();
   const list = S.docs.filter((d) =>
-    (S.f.cat === "All" || catOf(d) === S.f.cat) &&
-    (S.f.year === "All" || yearOf(d) === S.f.year) &&
-    (!q || [d.title, d.name, d.notes, d.category, d.date].some((v) => (v || "").toLowerCase().includes(q))));
+    (q ? [d.title, d.name, d.notes, d.date].some((v) => (v || "").toLowerCase().includes(q)) : d.folder === S.folder) &&
+    (S.f.year === "All" || yearOf(d) === S.f.year));
   const byDate = (a, b) => (b.date || "").localeCompare(a.date || "") || b.created - a.created;
   const sorts = {
     "date-desc": (a, b) => (!a.date - !b.date) || byDate(a, b),
@@ -283,70 +400,61 @@ function filteredDocs() {
   return list.sort(sorts[S.f.sort]);
 }
 
-function allCategories() {
-  return [...new Set([...CATEGORIES, ...S.docs.map(catOf)].filter((c) => c !== UNSORTED))].sort();
-}
-
-function categoryList() {
-  return el("datalist", { id: "catlist" }, [UNSORTED, ...allCategories()].map((c) => el("option", { value: c })));
-}
-
-async function uploadFiles(files) {
+async function uploadFiles(files, folder = S.folder) {
   files = [...files];
   if (!files.length) return;
-  const id = S.person;
-  const cat = S.f.cat !== "All" ? S.f.cat : "";
+  const id = S.person, where = folderName(folder);
   let ok = 0;
   for (const [i, f] of files.entries()) {
     toast("Adding " + (i + 1) + " of " + files.length + ": " + f.name, false, "upload");
     try {
-      await api("POST", "/api/people/" + id + "/docs?name=" + encodeURIComponent(f.name) + (cat ? "&category=" + encodeURIComponent(cat) : ""), f);
+      await api("POST", "/api/people/" + id + "/docs?name=" + encodeURIComponent(f.name) + "&folder=" + folder, f);
       ok++;
     } catch (e) { toast(f.name + ": " + e.message, true); }
   }
-  if (ok) toast(plural(ok, "document") + " added" + (cat ? " to " + cat : " to Unsorted"), false, "upload");
+  if (ok) toast(plural(ok, "document") + " added to " + where, false, "upload");
   if (S.person === id) refresh();
 }
 
 function renderDocs(body) {
-  const docs = filteredDocs();
+  const p = current();
   const picker = el("input", { type: "file", multiple: true, class: "hidden-input", id: "filePicker", onchange: () => uploadFiles(picker.files) });
   const years = [...new Set(S.docs.map(yearOf))].sort().reverse();
-  const counts = {};
-  for (const d of S.docs) counts[catOf(d)] = (counts[catOf(d)] || 0) + 1;
-  const chip = (c, n, warn) => el("button", { class: "chip" + (warn ? " warn" : "") + (S.f.cat === c ? " active" : ""), onclick: () => { S.f.cat = c; S.selected.clear(); renderWorkspace(); } }, c, el("span", {}, String(n)));
-  const search = el("input", { type: "search", placeholder: "Filter these documents", value: S.f.q, oninput: () => { S.f.q = search.value; renderList(); } });
+  const search = el("input", { type: "search", placeholder: "Search all of " + p.name + "'s documents", value: S.f.q,
+    oninput: () => { S.f.q = search.value; S.selected.clear(); renderList(); } });
+
+  const crumb = (id, label) => id === S.folder
+    ? el("span", { class: "crumb here", "aria-current": "location", ...dropInto(id) }, label)
+    : el("button", { class: "crumb", onclick: () => openFolder(id), ...dropInto(id) }, label);
+  const crumbs = el("nav", { class: "crumbs", "aria-label": "Folder path" },
+    S.folder ? el("button", { class: "btn btn-sm up", title: "Up one folder (Backspace)", onclick: () => openFolder(folderOf(S.folder).parent) }, "← Up") : null,
+    crumb(0, p.name), trail(S.folder).flatMap((f) => [el("span", { class: "sep", "aria-hidden": "true" }, "/"), crumb(f.id, f.name)]));
 
   const toolbar = el("div", { class: "toolbar" },
+    el("button", { class: "btn", onclick: () => { S.newFolder = true; S.f.q = ""; renderWorkspace(); } }, "+ New folder"),
     el("button", { class: "btn btn-primary", onclick: () => picker.click() }, "+ Add files"), picker,
     el("button", { class: "btn", onclick: startPair }, "Scan with phone"),
     el("span", { class: "grow" }),
     search,
-    el("select", { "aria-label": "Year", onchange: (e) => { S.f.year = e.target.value; renderWorkspace(); } },
+    el("select", { "aria-label": "Year", onchange: (e) => { S.f.year = e.target.value; S.selected.clear(); renderWorkspace(); } },
       el("option", { value: "All" }, "All years"), years.map((y) => el("option", { value: y, selected: S.f.year === y }, y))),
     el("select", { "aria-label": "Sort", onchange: (e) => { S.f.sort = e.target.value; renderWorkspace(); } },
       [["date-desc", "Newest document date"], ["date-asc", "Oldest document date"], ["added-desc", "Recently added"], ["title", "Title A–Z"]]
         .map(([v, l]) => el("option", { value: v, selected: S.f.sort === v }, l))));
 
-  const chips = el("div", { class: "chips" }, chip("All", S.docs.length),
-    counts[UNSORTED] ? chip(UNSORTED, counts[UNSORTED], true) : null,
-    Object.keys(counts).filter((c) => c !== UNSORTED).sort().map((c) => chip(c, counts[c])));
-
   const listBox = el("div", { class: "docs-list" });
-  const detailBox = el("div");
+  const detailBox = el("div", { class: "detail-slot" });
   const bulk = el("div");
 
   function renderBulk() {
     if (!S.selected.size) { bulk.replaceChildren(); return; }
-    const cat = el("input", { list: "catlist", placeholder: "Category" });
+    const to = el("select", { "aria-label": "Move to folder" }, folderOptions(S.folder));
     bulk.replaceChildren(el("div", { class: "bulkbar" },
-      el("b", {}, S.selected.size + " selected"), cat,
-      el("button", { class: "btn btn-sm btn-primary", onclick: async () => {
-        if (!cat.value.trim()) return cat.focus();
-        for (const id of S.selected) await api("PUT", "/api/docs/" + id, { category: cat.value.trim() });
-        toast(plural(S.selected.size, "document") + " moved to " + cat.value.trim());
-        S.selected.clear(); refresh();
-      } }, "Set category"),
+      el("b", {}, S.selected.size + " selected"),
+      el("button", { class: "btn btn-sm", onclick: () => { for (const d of filteredDocs()) S.selected.add(d.id); renderList(); } }, "Select all"),
+      el("span", { class: "grow" }),
+      to,
+      el("button", { class: "btn btn-sm btn-primary", onclick: () => moveItems({ docs: [...S.selected] }, Number(to.value)) }, "Move"),
       el("button", { class: "btn btn-sm btn-danger", onclick: async () => {
         if (!confirm("Delete " + plural(S.selected.size, "document") + "? This cannot be undone.")) return;
         for (const id of S.selected) await api("DELETE", "/api/docs/" + id);
@@ -357,68 +465,118 @@ function renderDocs(body) {
       el("button", { class: "btn btn-sm", onclick: () => { S.selected.clear(); renderList(); } }, "Clear")));
   }
 
-  function row(d) {
+  // folderForm keeps the typed name in S.draft, so a refresh while typing (an upload or a phone scan finishing) does not lose it.
+  function folderForm(key, label, value, submit) {
+    const kept = S.draft?.key === key;
+    const input = el("input", { value: kept ? S.draft.value : value, placeholder: "Folder name", required: true, "aria-label": "Folder name", autofocus: true, "data-select": !kept,
+      oninput: () => { S.draft = { key, value: input.value }; } });
+    const cancel = () => { S.newFolder = false; S.editFolder = null; S.draft = null; renderWorkspace(); };
+    const form = el("form", { class: "folder-form", onsubmit: async (e) => { e.preventDefault(); if (await submit(input.value.trim())) cancel(); } },
+      el("span", { class: "folder-ico" }, icon("folder")), input,
+      el("button", { class: "btn btn-sm btn-primary" }, label),
+      el("button", { type: "button", class: "btn btn-sm", onclick: cancel }, "Cancel"));
+    input.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); cancel(); } });
+    return form;
+  }
+
+  function folderRow(f, showPath) {
+    const ed = S.editFolder;
+    if (ed?.id === f.id && ed.mode === "rename") {
+      return folderForm("rename" + f.id, "Rename", f.name, async (name) => {
+        try { await api("PUT", "/api/folders/" + f.id, { name }); toast("Renamed to " + name); await refresh(); return true; } catch (e) { toast(e.message, true); return false; }
+      });
+    }
+    if (ed?.id === f.id && ed.mode === "move") {
+      const to = el("select", { "aria-label": "Move " + f.name + " to" }, folderOptions(f.parent, f.id));
+      return el("form", { class: "folder-form", onsubmit: (e) => { e.preventDefault(); S.editFolder = null; moveItems({ folders: [f.id] }, Number(to.value)); } },
+        el("span", { class: "folder-ico" }, icon("folder")), el("b", {}, "Move " + f.name + " to"), to,
+        el("button", { class: "btn btn-sm btn-primary" }, "Move"),
+        el("button", { type: "button", class: "btn btn-sm", onclick: () => { S.editFolder = null; renderList(); } }, "Cancel"));
+    }
+    const tool = (label, fn, cls) => el("button", { class: "btn btn-sm" + (cls ? " " + cls : ""), onclick: (e) => { e.stopPropagation(); fn(); } }, label);
+    return el("div", { class: "folder-row", draggable: "true", tabindex: 0, role: "button", "aria-label": "Open folder " + f.name,
+      onclick: () => openFolder(f.id), onkeydown: (e) => { if (e.key === "Enter" && e.target === e.currentTarget) openFolder(f.id); },
+      ondragstart: (e) => dragItems(e, { folders: [f.id] }), ...dropInto(f.id) },
+      el("span", { class: "folder-ico" }, icon("folder")),
+      el("div", { style: "min-width:0" },
+        el("div", { class: "doc-title" }, f.name),
+        el("div", { class: "doc-sub" }, showPath ? "In " + placeName(f.parent) : countText(deepCount(f.id)))),
+      el("span", { class: "row-tools" },
+        tool("Rename", () => { S.editFolder = { id: f.id, mode: "rename" }; renderList(); }),
+        tool("Move", () => { S.editFolder = { id: f.id, mode: "move" }; renderList(); }),
+        tool("Delete", () => deleteFolder(f), "btn-danger")));
+  }
+
+  function docRow(d, showPath) {
     const [label, cls] = typeOf(d);
-    return el("div", { class: "doc-row" + (S.openDoc === d.id ? " open" : ""), "data-id": d.id, onclick: () => { S.openDoc = d.id; renderList(); } },
+    return el("div", { class: "doc-row" + (S.openDoc === d.id ? " open" : ""), "data-id": d.id, draggable: "true",
+      ondragstart: (e) => dragItems(e, { docs: S.selected.has(d.id) ? [...S.selected] : [d.id] }),
+      onclick: () => { S.openDoc = d.id; renderList(); } },
       el("input", { type: "checkbox", checked: S.selected.has(d.id), "aria-label": "Select", onclick: (e) => e.stopPropagation(),
         onchange: (e) => { e.target.checked ? S.selected.add(d.id) : S.selected.delete(d.id); renderBulk(); } }),
       el("span", { class: "type " + cls }, label),
-      el("div", { style: "min-width:0" }, el("div", { class: "doc-title" }, d.title || d.name), el("div", { class: "doc-sub" }, d.name + (d.notes ? " · " + d.notes : ""))),
-      categorySelect(d),
+      el("div", { style: "min-width:0" }, el("div", { class: "doc-title" }, d.title || d.name),
+        el("div", { class: "doc-sub" }, showPath ? "In " + placeName(d.folder) : d.name + (d.notes ? " · " + d.notes : ""))),
       el("span", { class: "doc-date" }, d.date || "—"),
       el("span", { class: "doc-size" }, fmtSize(d.size)));
   }
 
+  function docSection(docs, showPath) {
+    if (!S.f.sort.startsWith("date")) return docs.map((d) => docRow(d, showPath));
+    const groups = new Map();
+    for (const d of docs) { const y = yearOf(d); if (!groups.has(y)) groups.set(y, []); groups.get(y).push(d); }
+    return [...groups].flatMap(([y, ds]) => [el("h3", { class: "year" }, y, el("span", {}, plural(ds.length, "document"))), ...ds.map((d) => docRow(d, showPath))]);
+  }
+
+  function quickStart() {
+    const box = el("div", { class: "quick" }, el("p", { class: "count" }, "Start with some common folders, or make your own with + New folder:"));
+    box.append(el("div", { class: "chips" }, SUGGESTED_FOLDERS.map((name) => el("button", { class: "chip", onclick: async (e) => { e.target.disabled = true; if (!await createFolder(name, 0, false)) e.target.disabled = false; } }, "+ " + name))));
+    return box;
+  }
+
   function renderList() {
-    const docs = filteredDocs();
     renderBulk();
-    if (!S.docs.length) {
-      listBox.replaceChildren(el("div", { class: "drop-hint" }, "No documents yet. Drop files anywhere here, use + Add files, or scan with the phone."));
-    } else if (!docs.length) {
-      listBox.replaceChildren(el("p", { class: "count" }, "No documents match these filters."));
-    } else if (S.f.sort.startsWith("date")) {
-      const groups = new Map();
-      for (const d of docs) { const y = yearOf(d); if (!groups.has(y)) groups.set(y, []); groups.get(y).push(d); }
-      listBox.replaceChildren(...[...groups].flatMap(([y, ds]) => [el("h3", { class: "year" }, y, el("span", {}, plural(ds.length, "document"))), ...ds.map(row)]));
+    const docs = filteredDocs();
+    const q = S.f.q.trim().toLowerCase();
+    if (q) {
+      const folders = S.folders.filter((f) => f.name.toLowerCase().includes(q)).sort(byName);
+      listBox.replaceChildren(...(folders.length || docs.length
+        ? [folders.length ? el("h3", { class: "year" }, "Folders", el("span", {}, String(folders.length))) : null, ...folders.map((f) => folderRow(f, true)),
+          ...(docs.length ? [el("h3", { class: "year" }, "Documents", el("span", {}, docs.length + (docs.length === 1 ? " match" : " matches"))), ...docs.map((d) => docRow(d, true))] : [])]
+        : [el("p", { class: "count" }, "Nothing in " + p.name + "'s folders matches “" + S.f.q.trim() + "”.")]).filter(Boolean));
     } else {
-      listBox.replaceChildren(...docs.map(row));
+      const folders = subfolders(S.folder);
+      const here = S.docs.filter((d) => d.folder === S.folder);
+      const where = S.folder ? folderOf(S.folder).name : p.name + "'s top level";
+      listBox.replaceChildren(...[
+        S.newFolder ? folderForm("new" + S.folder, "Create", "", (name) => createFolder(name, S.folder, true)) : null,
+        ...folders.map((f) => folderRow(f, false)),
+        folders.length && here.length ? el("div", { class: "divider" }) : null,
+        ...(here.length && !docs.length ? [el("p", { class: "count" }, "No documents here match this year.")] : docSection(docs, false)),
+        !folders.length && !here.length && !S.newFolder ? el("div", { class: "drop-hint" }, "Nothing in " + where + " yet. Drop files here, use + Add files, or scan with the phone.") : null,
+        !S.folders.length && !S.folder ? quickStart() : null,
+      ].filter(Boolean));
     }
     const d = S.docs.find((x) => x.id === S.openDoc);
     detailBox.replaceChildren(d ? renderDetail(d) : "");
+    const input = listBox.querySelector("input[autofocus]");
+    if (input) { input.focus(); if (input.dataset.select != null) input.select(); }
   }
 
-  body.replaceChildren(categoryList(), toolbar, chips, bulk, el("div", { class: "docs-split" }, listBox, detailBox));
+  body.replaceChildren(crumbs, toolbar, bulk, el("div", { class: "docs-split" }, listBox, detailBox));
   renderList();
 
   body.classList.add("docs-drop");
+  body.dataset.dropLabel = "Drop files to add them to " + (S.folder ? folderOf(S.folder).name : p.name);
   body.ondragover = (e) => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); body.classList.add("dropping"); } };
   body.ondragleave = (e) => { if (!body.contains(e.relatedTarget)) body.classList.remove("dropping"); };
   body.ondrop = (e) => {
     e.preventDefault();
     body.classList.remove("dropping");
+    if (e.dataTransfer.types.includes(DRAG)) return;
     if (fromPorta(e.dataTransfer)) { toast("That item is already in Porta", true); return; }
     uploadFiles(e.dataTransfer.files);
   };
-}
-
-// categorySelect changes a document's category in place, straight from its row.
-function categorySelect(d) {
-  const cur = catOf(d);
-  const s = el("select", { class: "cat-select" + (cur === UNSORTED ? " warn" : ""), "aria-label": "Category of " + (d.title || d.name),
-    onclick: (e) => e.stopPropagation(),
-    onchange: async () => {
-      let cat = s.value;
-      if (cat === NEW_CATEGORY) {
-        cat = (prompt("Name of the new category") || "").trim();
-        if (!cat) { s.value = cur; return; }
-      }
-      await api("PUT", "/api/docs/" + d.id, { category: cat });
-      toast("Moved to " + cat);
-      refresh();
-    } },
-    [UNSORTED, ...new Set([...allCategories(), cur])].filter((c, i, a) => a.indexOf(c) === i).map((c) => el("option", { value: c, selected: c === cur }, c)),
-    el("option", { value: NEW_CATEGORY }, "+ New category…"));
-  return s;
 }
 
 // fromPorta reports whether a drop carries something dragged out of Porta itself, such as a previewed page.
@@ -427,40 +585,90 @@ function fromPorta(dt) {
   return urls.includes(location.origin + "/") || /src="\/api\/|href="\/api\//.test(urls);
 }
 
-// Nothing in Porta is meant to be dragged; stopping it here keeps previews and links from being dropped back in as new files.
-document.addEventListener("dragstart", (e) => e.preventDefault());
+// Only document and folder rows may be dragged; stopping everything else keeps previews and links from being dropped back in as new files.
+document.addEventListener("dragstart", (e) => { if (!e.target.closest?.('[draggable="true"]')) e.preventDefault(); });
 // A file dropped outside the drop area would make the browser open it and leave Porta.
 document.addEventListener("dragover", (e) => { if (!e.target.closest?.(".docs-drop")) { e.preventDefault(); e.dataTransfer.dropEffect = "none"; } });
 document.addEventListener("drop", (e) => { if (!e.target.closest?.(".docs-drop")) e.preventDefault(); });
 
+const fileURL = (d) => "/api/docs/" + d.id + "/file";
+
+// docPreview shows a document inside Porta: in the side panel, or full size in the viewer (big). Images zoom on click in the viewer.
+function docPreview(d, big) {
+  const url = fileURL(d);
+  const box = el("div", { class: big ? "viewer-body" : "preview", onclick: big ? null : (e) => { if (!e.target.closest("a, button")) openViewer(d.id); } });
+  if (d.mime === "application/pdf") box.append(el("iframe", { src: url, title: "Preview of " + (d.title || d.name) }));
+  else if (/^image\/(jpeg|png|gif|webp)$/.test(d.mime)) {
+    const img = el("img", { src: url, alt: d.title || d.name, title: big ? "Click to zoom" : "Click for full screen" });
+    if (big) img.addEventListener("click", () => img.classList.toggle("zoomed"));
+    box.append(img);
+  } else if ((d.mime || "").startsWith("text/plain")) fetch(url).then((r) => r.text()).then((t) => box.replaceChildren(el("pre", {}, t.slice(0, 200000))));
+  else box.append(el("div", { class: "no-preview" }, el("p", {}, "No preview for this file type."), el("a", { class: "btn btn-sm", href: url + "?dl=1" }, "Download " + d.name)));
+  return box;
+}
+
+// openViewer shows a document full screen, with the documents of the current list one arrow key away.
+function openViewer(id) {
+  document.querySelector(".viewer")?.remove();
+  const list = filteredDocs().map((d) => d.id);
+  if (!list.includes(id)) list.unshift(id);
+  let i = list.indexOf(id);
+  const head = el("div", { class: "viewer-head" });
+  const stage = el("div", { class: "viewer-stage" });
+  const ov = el("div", { class: "overlay viewer", "data-start": id, role: "dialog", "aria-modal": "true", "aria-label": "Document viewer" }, head, stage);
+  const show = () => {
+    const d = S.docs.find((x) => x.id === list[i]);
+    if (!d) return closeViewer();
+    S.openDoc = d.id;
+    const many = list.length > 1;
+    head.replaceChildren(
+      el("div", { class: "viewer-title" }, el("b", {}, d.title || d.name),
+        el("small", {}, [placeName(d.folder), d.name, fmtSize(d.size), many ? (i + 1) + " of " + list.length : null].filter(Boolean).join(" · "))),
+      many ? el("button", { class: "btn btn-sm", title: "Previous (←)", onclick: () => ov.step(-1) }, "‹ Prev") : null,
+      many ? el("button", { class: "btn btn-sm", title: "Next (→)", onclick: () => ov.step(1) }, "Next ›") : null,
+      el("a", { class: "btn btn-sm", href: fileURL(d) + "?dl=1" }, "Download"),
+      el("button", { class: "btn btn-sm btn-primary", "data-close": true, title: "Close (Esc)", onclick: closeViewer }, "Close"));
+    stage.replaceChildren(docPreview(d, true));
+  };
+  ov.step = (n) => { i = (i + n + list.length) % list.length; show(); };
+  document.body.append(ov);
+  show();
+}
+
+// closeViewer re-renders only when the viewer moved to another document, so unsaved edits in the side panel survive.
+function closeViewer() {
+  const v = document.querySelector(".viewer");
+  if (!v) return;
+  v.remove();
+  if (Number(v.dataset.start) !== S.openDoc && S.tab === "docs") renderWorkspace();
+}
+
 function renderDetail(d) {
-  const url = "/api/docs/" + d.id + "/file";
-  const preview = el("div", { class: "preview" });
-  if (d.mime === "application/pdf") preview.append(el("iframe", { src: url, title: "Preview" }));
-  else if (/^image\/(jpeg|png|gif|webp)$/.test(d.mime)) preview.append(el("img", { src: url, alt: d.title }));
-  else if ((d.mime || "").startsWith("text/plain")) fetch(url).then((r) => r.text()).then((t) => preview.replaceChildren(el("pre", {}, t.slice(0, 200000))));
-  else preview.append(el("p", {}, "No preview for this file type. Use Download to open it."));
+  const url = fileURL(d);
+  const preview = docPreview(d, false);
   const title = el("input", { value: d.title || d.name, required: true });
-  const cat = el("input", { value: catOf(d), list: "catlist" });
+  const folder = el("select", {}, folderOptions(d.folder));
   const date = el("input", { value: d.date || "", placeholder: "e.g. 2019 or 2019-04-12", pattern: "\\d{4}(-\\d{2}(-\\d{2})?)?" });
   const notes = el("textarea", { rows: 3, placeholder: "What is it, what is it for?" }, d.notes || "");
   return el("aside", { class: "detail" },
-    el("div", { class: "detail-head" }, el("h3", {}, d.title || d.name), el("button", { class: "btn btn-sm", onclick: () => { S.openDoc = null; renderWorkspace(); } }, "Close")),
+    el("div", { class: "detail-head" }, el("h3", {}, d.title || d.name),
+      el("button", { class: "btn btn-sm btn-primary", title: "Full screen", onclick: () => openViewer(d.id) }, "⤢ Full screen"),
+      el("button", { class: "btn btn-sm", onclick: () => { S.openDoc = null; renderWorkspace(); } }, "Close")),
     preview,
     el("form", { onsubmit: async (e) => {
       e.preventDefault();
-      await api("PUT", "/api/docs/" + d.id, { title: title.value.trim(), category: cat.value.trim() || UNSORTED, date: date.value.trim(), notes: notes.value });
-      toast("Saved"); refresh();
+      const to = Number(folder.value);
+      await api("PUT", "/api/docs/" + d.id, { title: title.value.trim(), folder: to, date: date.value.trim(), notes: notes.value });
+      toast(to === d.folder ? "Saved" : "Saved and moved to " + folderName(to)); refresh();
     } },
       el("p", { class: "facts" }, d.name + " · " + fmtSize(d.size) + " · added " + fmtAdded(d.created)),
       el("label", { class: "field" }, el("span", {}, "Title"), title),
       el("div", { class: "grid2" },
-        el("label", { class: "field" }, el("span", {}, "Category"), cat),
+        el("label", { class: "field" }, el("span", {}, "Folder"), folder),
         el("label", { class: "field" }, el("span", {}, "Document date"), date)),
       el("label", { class: "field" }, el("span", {}, "Notes"), notes),
       el("div", { class: "row-actions" },
         el("button", { class: "btn btn-primary" }, "Save"),
-        el("a", { class: "btn", href: url, target: "_blank" }, "Open"),
         el("a", { class: "btn", href: url + "?dl=1" }, "Download"),
         el("button", { type: "button", class: "btn btn-danger", onclick: async () => {
           if (!confirm("Delete " + (d.title || d.name) + "?")) return;
@@ -470,8 +678,8 @@ function renderDetail(d) {
 
 /* ---------------- Phone pairing ---------------- */
 async function startPair() {
-  const id = S.person;
-  const r = await api("POST", "/api/pair", { person: id });
+  const id = S.person, folder = S.folder;
+  const r = await api("POST", "/api/pair", { person: id, folder });
   clearInterval(pairTimer);
   document.querySelector(".overlay")?.remove();
   const status = el("p", { class: "status" }, "Waiting for the phone…");
@@ -480,9 +688,10 @@ async function startPair() {
     el("div", { class: "dialog", role: "dialog" },
       el("h2", {}, "Scan with your phone"),
       el("p", {}, "Point the phone camera at this code. The phone must be on the same Wi-Fi. The link works once and expires in 5 minutes."),
+      el("p", {}, "Saves to ", el("b", {}, placeName(folder))),
       el("img", { src: "/api/pair/qr?" + Date.now(), alt: "QR code" }),
       el("code", {}, r.url), status,
-      el("button", { class: "btn", onclick: close }, "Close")));
+      el("button", { class: "btn", "data-close": true, onclick: close }, "Close")));
   document.body.append(ov);
   pairTimer = setInterval(async () => {
     const s = await api("GET", "/api/pair", undefined, true).catch(() => null);
@@ -628,7 +837,7 @@ function renderProfile(body) {
       el("label", { class: "field" }, el("span", {}, "Notes"), notes),
       el("button", { class: "btn btn-primary" }, "Save changes")),
     el("div", { class: "danger-zone" },
-      el("p", {}, "Deleting " + p.name + " also deletes all of their documents, credentials and tasks."),
+      el("p", {}, "Deleting " + p.name + " also deletes all of their folders, documents, credentials and tasks."),
       el("button", { class: "btn btn-danger", onclick: async () => {
         if (!confirm("Delete " + p.name + " and everything stored for them?")) return;
         await api("DELETE", "/api/people/" + p.id);
@@ -651,16 +860,29 @@ $("q").addEventListener("input", async () => {
   };
   const items = [
     ...group("people", "People", (h) => selectPerson(h.person, "docs")),
-    ...group("docs", "Documents", (h) => { S.openDoc = h.id; S.f.cat = "All"; S.f.year = "All"; S.f.q = ""; selectPerson(h.person, "docs").then(() => { S.openDoc = h.id; renderWorkspace(); }); }),
+    ...group("folders", "Folders", (h) => goTo(h.person, h.folder)),
+    ...group("docs", "Documents", (h) => goTo(h.person, h.folder, h.id)),
     ...group("creds", "Credentials", (h) => selectPerson(h.person, "creds")),
   ];
   $("hits").replaceChildren(...(items.length ? items : [el("p", { class: "count", style: "padding:8px 10px;margin:0" }, "No matches.")]));
   $("hits").hidden = false;
 });
 document.addEventListener("click", (e) => { if (!e.target.closest(".search")) $("hits").hidden = true; });
+
+// goTo opens a person's documents at a folder, and optionally a document in it.
+async function goTo(person, folder, doc) {
+  await selectPerson(person, "docs");
+  S.f.q = "";
+  openFolder(folder);
+  if (doc) { S.openDoc = doc; renderWorkspace(); }
+}
 document.addEventListener("keydown", (e) => {
-  if (e.key === "/" && !$("main").hidden && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $("q").focus(); }
-  if (e.key === "Escape") { $("hits").hidden = true; document.querySelector(".overlay .btn")?.click(); }
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  const viewer = document.querySelector(".viewer");
+  if (viewer && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); viewer.step(e.key === "ArrowLeft" ? -1 : 1); return; }
+  if (e.key === "/" && !$("main").hidden && !typing && !viewer) { e.preventDefault(); $("q").focus(); }
+  if (e.key === "Backspace" && !typing && !$("main").hidden && S.tab === "docs" && S.folder && !document.querySelector(".overlay")) { e.preventDefault(); openFolder(folderOf(S.folder).parent); }
+  if (e.key === "Escape") { $("hits").hidden = true; document.querySelector(".overlay [data-close]")?.click(); }
 });
 
 boot();
