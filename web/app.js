@@ -289,7 +289,7 @@ function renderWorkspace() {
   if (!p) {
     $("workspace").replaceChildren(el("div", { class: "panel empty-state" },
       el("h2", {}, S.people.length ? "Choose a person" : "Welcome to Porta"),
-      el("p", {}, S.people.length ? "Pick someone on the left to see their documents, credentials and tasks." : "Add the first person you are helping. Each person keeps their own documents, credentials and tasks."),
+      el("p", {}, S.people.length ? "Pick someone on the left to see their documents, credentials and tasks." : "Add your first person. Each person keeps their own folders, documents, credentials and tasks."),
       el("button", { class: "btn btn-primary", onclick: () => $("newPersonBtn").click() }, "+ Add a person")));
     return;
   }
