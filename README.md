@@ -75,6 +75,7 @@ Porta always listens on port 8787. The main app answers only this computer (`127
 | `web/index.html`, `web/app.js` | The app in the computer's browser |
 | `web/phone.html` | The phone scan page: camera, cropping, color modes, sending |
 | `web/style.css` | Styles for both pages |
+| `docs/` | Static showcase website for GitHub Pages |
 | `START.sh` | Linux launcher, also for sticks that do not allow running programs |
 
 ## License
