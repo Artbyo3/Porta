@@ -76,6 +76,7 @@ Porta always listens on port 8787. The main app answers only this computer (`127
 | `web/phone.html` | The phone scan page: camera, cropping, color modes, sending |
 | `web/style.css` | Styles for both pages |
 | `docs/` | Static showcase website for GitHub Pages |
+| `rsrc_windows_amd64.syso` | Windows icon resource built from `web/favicon.ico`, linked into `porta.exe` |
 | `START.sh` | Linux launcher, also for sticks that do not allow running programs |
 
 ## License
