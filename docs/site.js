@@ -44,7 +44,6 @@
       const rel = await res.json();
       const assets = Array.isArray(rel.assets) ? rel.assets : [];
       const zip = assets.find((a) => /^Porta-.*\.zip$/i.test(a.name)) || assets.find((a) => /\.zip$/i.test(a.name));
-      const sums = assets.find((a) => a.name === "SHA256SUMS.txt");
 
       if (rel.tag_name) {
         document.querySelectorAll("[data-release-version]").forEach((n) => {
@@ -60,19 +59,11 @@
         document.querySelectorAll("[data-download-link]").forEach((a) => {
           a.href = zip.browser_download_url;
         });
-        document.querySelectorAll("[data-zip-name]").forEach((n) => {
-          n.textContent = zip.name;
-        });
         if (typeof zip.size === "number" && zip.size > 0) {
           document.querySelectorAll("[data-download-size]").forEach((n) => {
             n.textContent = formatMB(zip.size);
           });
         }
-      }
-      if (sums && sums.browser_download_url) {
-        document.querySelectorAll("[data-checksum-link]").forEach((a) => {
-          a.href = sums.browser_download_url;
-        });
       }
     } catch (_) {
       // Offline or rate-limited: HTML already carries valid v1.0.0 release links.
@@ -100,7 +91,7 @@
           badgeClass: "pdf",
           date: "2026-04-12",
           size: "1.4 MB",
-          preview: "Scanned 2-page PDF · Encrypted blob\nIssuer: Passport Agency\nExpires: Apr 2036",
+          preview: "2-page scanned PDF\nPassport Agency\nExpires: Apr 2036",
         },
         {
           id: "license",
@@ -110,7 +101,7 @@
           badgeClass: "img",
           date: "2026-02-03",
           size: "640 KB",
-          preview: "Image preview (1600 × 1010)\nStored inside Porta-Data/blobs/\nClick Full Screen in Porta to zoom.",
+          preview: "Photo saved privately on your drive\nOpen full screen inside Porta to zoom in.",
         },
         {
           id: "w2",
@@ -120,7 +111,7 @@
           badgeClass: "pdf",
           date: "2026-03-19",
           size: "820 KB",
-          preview: "Tax Year 2025 Filing Summary\nConfirmation #482-910-33\nArchived from browser upload.",
+          preview: "2025 Tax Filing Summary\nConfirmation #482-910-33\nSaved privately on your drive.",
         },
         {
           id: "rx",
@@ -160,7 +151,7 @@
           badgeClass: "pdf",
           date: "2025-09-01",
           size: "2.1 MB",
-          preview: "12-page PDF · Scanned via Phone Scan\nTerm: Sep 2025 – Aug 2027\nSecurity deposit receipt on page 11.",
+          preview: "12-page PDF · Scanned with Phone Scan\nTerm: Sep 2025 – Aug 2027\nSecurity deposit receipt on page 11.",
         },
         {
           id: "meter",
@@ -170,11 +161,11 @@
           badgeClass: "txt",
           date: "2025-09-04",
           size: "1 KB",
-          preview: "Electric account: #8841-209\nWater billing cycle: Monthly\nEmergency maintenance: 555-0148",
+          preview: "Electric account: #8841-209\nMonthly billing cycle\nMaintenance contact: 555-0148",
         },
       ],
       creds: [
-        { title: "Home Wi-Fi Router", site: "192.168.1.1", user: "admin", pass: "cedar-forest-88*" },
+        { title: "Home Wi-Fi", site: "Home router", user: "admin", pass: "cedar-forest-88*" },
       ],
       tasks: [
         { id: "h1", label: "Renew renters policy before September", done: false },
@@ -283,14 +274,14 @@
         el(
           "div",
           { class: "demo-person-sub" },
-          person.docs.length + " documents · " + person.creds.length + " credentials · " + person.tasks.filter((t) => !t.done).length + " open tasks"
+          person.docs.length + " documents · " + person.creds.length + " logins · " + person.tasks.filter((t) => !t.done).length + " open tasks"
         )
       )
     );
 
     const tabs = [
       { id: "docs", label: "Documents", count: person.docs.length },
-      { id: "creds", label: "Credentials", count: person.creds.length },
+      { id: "creds", label: "Logins", count: person.creds.length },
       { id: "tasks", label: "Tasks", count: person.tasks.filter((t) => !t.done).length },
       { id: "scan", label: "Phone Scan", count: null },
     ];
@@ -411,7 +402,7 @@
             "div",
             { class: "detail-meta" },
             el("span", {}, "Added: " + openDoc.date + " · Size: " + openDoc.size),
-            el("span", {}, "Encrypted with AES-256-GCM")
+            el("span", {}, "Locked with your master password")
           )
         )
       : el(
@@ -429,7 +420,7 @@
       (c) => !q || c.title.toLowerCase().includes(q) || c.site.toLowerCase().includes(q) || c.user.toLowerCase().includes(q)
     );
     if (creds.length === 0) {
-      body.replaceChildren(el("p", { class: "row-sub" }, "No matching credentials."));
+      body.replaceChildren(el("p", { class: "row-sub" }, "No matching logins."));
       return;
     }
     const grid = el(
@@ -523,8 +514,8 @@
   function renderScanTab(person, body) {
     const modeNotes = {
       Color: "Color mode keeps stamps, signatures, and highlights crisp.",
-      Gray: "Gray mode softens shadows while keeping text legible.",
-      "B&W": "B&W mode outputs high-contrast pages ideal for receipts and forms.",
+      Gray: "Gray mode softens shadows while keeping text easy to read.",
+      "B&W": "B&W mode gives clean black-and-white pages for receipts and forms.",
     };
     const modes = ["Color", "Gray", "B&W"];
     body.replaceChildren(
@@ -535,7 +526,7 @@
           "div",
           { class: "qr-box" },
           qrSvg(),
-          el("small", {}, "One-time LAN link"),
+          el("small", {}, "Connects over your Wi-Fi"),
           el("small", {}, "Saves to " + person.name)
         ),
         el(
@@ -545,7 +536,7 @@
           el(
             "p",
             {},
-            "Point your phone camera at the QR code on the same Wi-Fi. Crop corners, press and hold to reorder pages, preview filter modes, and Porta builds one encrypted PDF."
+            "Point your phone camera at the QR code while on the same Wi-Fi. Crop the corners, press and hold to reorder pages, pick a look, and save everything as one locked PDF."
           ),
           el(
             "div",
@@ -584,29 +575,6 @@
     else renderScanTab(person, body);
   }
 
-  function wireCopyButtons() {
-    document.querySelectorAll("[data-copy-target]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const target = document.getElementById(btn.getAttribute("data-copy-target"));
-        if (!target) return;
-        const text = target.textContent.trim();
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text);
-          }
-          const orig = btn.textContent;
-          btn.textContent = "Copied";
-          showToast("Copied command");
-          setTimeout(() => {
-            btn.textContent = orig;
-          }, 1600);
-        } catch (_) {
-          showToast("Select and copy the command manually");
-        }
-      });
-    });
-  }
-
   function wireSearch() {
     const input = document.getElementById("demoSearch");
     if (!input) return;
@@ -617,7 +585,6 @@
   }
 
   renderDemo();
-  wireCopyButtons();
   wireSearch();
   syncLatestRelease();
 })();

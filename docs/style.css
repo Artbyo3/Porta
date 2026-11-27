@@ -31,14 +31,6 @@ body {
 h1, h2, h3 { margin: 0; line-height: 1.22; }
 a { color: var(--green-700); }
 button, input { font: inherit; color: inherit; }
-code {
-  font-family: ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 0.9em;
-  background: var(--green-50);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 1px 6px;
-}
 
 /* ---------- Meadow background ---------- */
 .meadow {
@@ -518,7 +510,7 @@ code {
 .detail-meta { padding: 10px 12px; font-size: 12.5px; color: var(--muted); display: grid; gap: 4px; }
 
 /* Credentials demo */
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; min-width: 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; min-width: 0; }
 .card {
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -530,14 +522,24 @@ code {
 .card .site { font-size: 12.5px; color: var(--green-700); margin-bottom: 10px; }
 .kv {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
   font-size: 13px;
 }
 .kv > span:first-child { color: var(--muted); font-size: 12px; }
-.kv code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv code {
+  font-family: ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--green-50);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .kv-actions { display: flex; gap: 4px; }
 
 /* Tasks demo */
@@ -650,62 +652,17 @@ code {
 .step-card h3 { font-size: 17px; margin-bottom: 6px; }
 .step-card p { margin: 0; color: var(--muted); font-size: 14.5px; }
 
-/* ---------- Download & Verify ---------- */
-.download-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
-.download-hero {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--line);
-  min-width: 0;
-}
-.download-hero > div { min-width: 0; }
-.download-hero h2 { font-size: 26px; color: var(--forest); margin-bottom: 4px; }
-.download-hero p { margin: 0; color: var(--muted); }
-.download-actions { display: flex; flex-wrap: wrap; gap: 10px; max-width: 100%; }
-
-.verify-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  min-width: 0;
-}
-.code-box {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 18px;
+/* ---------- Download ---------- */
+.download-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  min-width: 0;
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
 }
-.code-box h3 { font-size: 16px; }
-.code-box p { margin: 0; font-size: 14px; color: var(--muted); }
-.cmd-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--green-50);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 6px 8px 6px 10px;
-  min-width: 0;
-  max-width: 100%;
-}
-.cmd-row code {
-  display: block;
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  overflow-x: auto;
-  white-space: nowrap;
-}
+.download-panel h2 { font-size: 28px; color: var(--forest); }
+.download-panel p { margin: 0; max-width: 560px; color: var(--muted); }
+.download-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 6px; max-width: 100%; }
 
 /* ---------- Footer ---------- */
 .footer {
@@ -759,7 +716,7 @@ code {
   .demo-shell { flex-direction: column; }
   .demo-sidebar { width: 100%; }
   .docs-split { grid-template-columns: 1fr; }
-  .feature-grid, .steps-grid, .verify-grid { grid-template-columns: 1fr 1fr; }
+  .feature-grid, .steps-grid { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 640px) {
@@ -770,7 +727,7 @@ code {
   .section-panel { padding: 20px 14px; }
   .demo-shell { padding: 10px; }
   .demo-tab-body { padding: 12px; }
-  .cards, .feature-grid, .steps-grid, .verify-grid, .scan-demo { grid-template-columns: minmax(0, 1fr); }
+  .cards, .feature-grid, .steps-grid, .scan-demo { grid-template-columns: minmax(0, 1fr); }
   .demo-pill { display: none; }
   .download-actions .btn { width: 100%; }
   .footer { padding: 6px 12px 24px; }

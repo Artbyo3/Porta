@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Porta — Portable, Encrypted Vault on a USB Stick</title>
-  <meta name="description" content="A portable, encrypted vault for documents, credentials and tasks. Runs from a USB stick on Windows or Linux with no installation and no cloud.">
+  <title>Porta — Your Private Vault on a USB Stick</title>
+  <meta name="description" content="Keep your documents, logins, and tasks locked on one drive. Runs straight from a USB stick on Windows or Linux with no installation and no cloud.">
   <meta name="theme-color" content="#1f5124">
-  <meta property="og:title" content="Porta — Portable, Encrypted Vault on a USB Stick">
-  <meta property="og:description" content="Your documents, credentials and tasks. Encrypted with Argon2id and AES-256-GCM on one drive, with your browser as the interface.">
+  <meta property="og:title" content="Porta — Your Private Vault on a USB Stick">
+  <meta property="og:description" content="Keep your documents, logins, and tasks locked behind one master password on your own drive.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://artbyo3.github.io/Porta/">
   <meta property="og:image" content="./apple-touch-icon.png">
@@ -28,8 +28,6 @@
         <a href="#preview">Preview</a>
         <a href="#features">Features</a>
         <a href="#how-it-works">How it works</a>
-        <a href="#download">Download</a>
-        <a href="https://github.com/Artbyo3/Porta" target="_blank" rel="noopener">GitHub</a>
       </nav>
       <a class="btn btn-primary btn-sm topbar-cta" data-download-link href="https://github.com/Artbyo3/Porta/releases/download/v1.0.0/Porta-v1.0.0.zip">Download</a>
     </div>
@@ -38,36 +36,34 @@
   <main id="top" class="page">
     <section class="hero panel">
       <div class="hero-badge">
-        <span data-release-version>v1.0.0</span> · Windows &amp; Linux · MIT License
+        Free &amp; Private · Windows &amp; Linux
       </div>
-      <h1>Your documents, credentials and tasks. Encrypted, on one drive.</h1>
+      <h1>Keep your documents, logins, and tasks locked on one drive.</h1>
       <p class="hero-lead">
-        Porta runs directly from a USB stick on Windows or Linux with no installer, no account, and no cloud.
-        Everything stays encrypted next to the program, and your browser is the interface.
+        Porta runs straight from a USB stick or folder with no installation, no account, and nothing uploaded to the cloud.
+        It opens right in your web browser.
       </p>
       <div class="hero-actions">
         <a id="downloadBtn" class="btn btn-primary btn-lg" data-download-link href="https://github.com/Artbyo3/Porta/releases/download/v1.0.0/Porta-v1.0.0.zip">
-          <span>Download Porta <span data-release-version>v1.0.0</span></span>
+          <span>Download Porta</span>
         </a>
-        <a class="btn btn-lg" href="https://github.com/Artbyo3/Porta" target="_blank" rel="noopener">
-          View on GitHub
+        <a class="btn btn-lg" href="#preview">
+          Try the preview
         </a>
       </div>
       <p id="downloadMeta" class="hero-meta">
         <span><strong data-download-size>16.2 MB</strong> ZIP</span>
         <span aria-hidden="true">·</span>
-        <span>Windows &amp; Linux (amd64)</span>
+        <span>Windows &amp; Linux</span>
         <span aria-hidden="true">·</span>
-        <a id="checksumLink" data-checksum-link href="https://github.com/Artbyo3/Porta/releases/download/v1.0.0/SHA256SUMS.txt">SHA256SUMS.txt</a>
-        <span aria-hidden="true">·</span>
-        <a id="releaseNotesLink" data-release-notes href="https://github.com/Artbyo3/Porta/releases/latest" target="_blank" rel="noopener">Release notes</a>
+        <span data-release-version>v1.0.0</span>
       </p>
     </section>
 
     <section id="preview" class="section">
       <div class="section-head">
         <h2>Try the interface</h2>
-        <p>Click between people, folders, documents, credentials, tasks, and the phone scanner.</p>
+        <p>Click between people, folders, documents, logins, tasks, and phone scanning.</p>
       </div>
 
       <div class="browser-frame" role="region" aria-label="Interactive Porta interface preview">
@@ -80,16 +76,16 @@
               <rect x="4" y="11" width="16" height="10" rx="2"></rect>
               <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
             </svg>
-            <span>http://127.0.0.1:8787</span>
+            <span>Porta — Private Vault</span>
           </div>
-          <div class="browser-tag">Local only</div>
+          <div class="browser-tag">Offline &amp; private</div>
         </div>
 
         <div class="demo-app">
           <div class="demo-appbar">
             <div class="demo-brand">Porta</div>
             <div class="demo-search">
-              <input id="demoSearch" type="search" placeholder="Search everyone: people, folders, documents, credentials   ( / )" aria-label="Demo search">
+              <input id="demoSearch" type="search" placeholder="Search people, folders, documents, or logins" aria-label="Demo search">
             </div>
             <span class="btn btn-ghost-light btn-sm demo-pill">Auto-lock 10m</span>
           </div>
@@ -98,7 +94,7 @@
             <aside class="demo-sidebar">
               <div class="demo-sidebar-head">
                 <h3>People <span id="demoPeopleCount" class="count">(2)</span></h3>
-                <span class="demo-hint">Demo data</span>
+                <span class="demo-hint">Demo</span>
               </div>
               <ul id="demoPeopleList" class="people" role="list"></ul>
             </aside>
@@ -117,8 +113,8 @@
 
     <section id="features" class="section panel section-panel">
       <div class="section-head">
-        <h2>Everything you need on one stick</h2>
-        <p>Built to stay simple, private, and self-contained without cloud accounts or background services.</p>
+        <h2>Simple, private, and all yours</h2>
+        <p>Everything stays safely locked on your own drive — no subscriptions, no accounts, no cloud.</p>
       </div>
 
       <div class="feature-grid">
@@ -128,8 +124,8 @@
               <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
             </svg>
           </div>
-          <h3>People &amp; Nested Folders</h3>
-          <p>Each person keeps their own nested folders, documents, credentials, and tasks. Organize fast with drag-and-drop, box select, Shift-click, and Ctrl+A.</p>
+          <h3>Organized by Person &amp; Folder</h3>
+          <p>Keep each person's documents, logins, and tasks separated in folders you can nest and drag around.</p>
         </article>
 
         <article class="feature-card">
@@ -138,8 +134,8 @@
               <path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"></path>
             </svg>
           </div>
-          <h3>Strong Local Encryption</h3>
-          <p>Protected by one master password using Argon2id key derivation and AES-256-GCM encryption for your database and file blobs. Auto-locks after 10 idle minutes.</p>
+          <h3>Locked With One Password</h3>
+          <p>Every document, PDF, photo, and password is locked behind your master password, so even if your USB stick is lost or stolen, nobody can read it. Locks itself after 10 minutes away.</p>
         </article>
 
         <article class="feature-card">
@@ -149,8 +145,8 @@
               <path d="M14 4v5h5M8 13h8M8 17h5"></path>
             </svg>
           </div>
-          <h3>Built-in Previews</h3>
-          <p>Open PDFs, images, and text files directly inside Porta — in the side panel or full screen with zoom and previous/next navigation.</p>
+          <h3>View Files Right Inside</h3>
+          <p>Open PDFs, photos, and text notes directly in Porta, side-by-side or full screen.</p>
         </article>
 
         <article class="feature-card">
@@ -160,8 +156,8 @@
               <path d="M10 18h4M9 7h6M9 11h6"></path>
             </svg>
           </div>
-          <h3>Phone Scanning to PDF</h3>
-          <p>Scan a QR code over local Wi-Fi, photograph pages, crop and flatten them, press and hold to reorder, preview Color, Gray, or B&amp;W, and save as one PDF.</p>
+          <h3>Scan Paper With Your Phone</h3>
+          <p>Scan a QR code on the same Wi-Fi, snap photos of pages, crop and straighten them, reorder pages, and save them as one PDF.</p>
         </article>
 
         <article class="feature-card">
@@ -171,8 +167,8 @@
               <path d="M21 21l-4.35-4.35"></path>
             </svg>
           </div>
-          <h3>Instant Search</h3>
-          <p>Press <code>/</code> anywhere in Porta to search across every person, folder, document, and credential at once.</p>
+          <h3>Find Anything Fast</h3>
+          <p>One search bar finds any person, folder, document, or saved login in seconds.</p>
         </article>
 
         <article class="feature-card">
@@ -182,8 +178,8 @@
               <path d="M8 7V4h8v3M9 12h6"></path>
             </svg>
           </div>
-          <h3>True USB Portability</h3>
-          <p>Zero installation and zero cloud. Back up by copying the <code>Porta</code> folder. Runs on Windows (<code>porta.exe</code>) and Linux (<code>sh START.sh</code>, even on <code>noexec</code> drives).</p>
+          <h3>Carry It Anywhere</h3>
+          <p>Nothing to install and no cloud subscriptions. Keep Porta on a USB stick and back up your entire vault just by copying one folder.</p>
         </article>
       </div>
     </section>
@@ -191,70 +187,35 @@
     <section id="how-it-works" class="section panel section-panel">
       <div class="section-head">
         <h2>How it works</h2>
-        <p>Start in under a minute from any USB drive or local folder.</p>
+        <p>Up and running in less than a minute.</p>
       </div>
 
       <ol class="steps-grid">
         <li class="step-card">
           <span class="step-num">1</span>
           <h3>Download &amp; Unzip</h3>
-          <p>Download the release archive and unzip it. Copy the <code>Porta</code> folder to a USB stick or anywhere you like.</p>
+          <p>Download Porta, unzip it, and place the <strong>Porta</strong> folder on a USB stick or anywhere on your computer.</p>
         </li>
         <li class="step-card">
           <span class="step-num">2</span>
-          <h3>Launch Locally</h3>
-          <p><strong>Windows:</strong> double-click <code>porta.exe</code>. <strong>Linux:</strong> open a terminal in the folder and run <code>sh START.sh</code>. Your browser opens <code>http://127.0.0.1:8787</code>.</p>
+          <h3>Open Porta</h3>
+          <p>On Windows, double-click <strong>porta.exe</strong>. On Linux, run <strong>START.sh</strong>. Porta opens right in your web browser.</p>
         </li>
         <li class="step-card">
           <span class="step-num">3</span>
-          <h3>Unlock &amp; Go</h3>
-          <p>Choose a master password — it cannot be recovered if lost. Encrypted data lives in <code>Porta-Data</code> next to the program. Close the console window to quit.</p>
+          <h3>Choose Your Password</h3>
+          <p>Pick one strong master password to lock your vault (remember it well — it cannot be reset). Close the Porta window whenever you're done.</p>
         </li>
       </ol>
     </section>
 
     <section id="download" class="section panel section-panel download-panel">
-      <div class="download-hero">
-        <div>
-          <h2>Download Porta <span data-release-version>v1.0.0</span></h2>
-          <p>Includes <code>porta.exe</code> (Windows), <code>porta-linux</code>, and <code>START.sh</code> (Linux, amd64). macOS is not supported yet.</p>
-        </div>
-        <div class="download-actions">
-          <a class="btn btn-primary btn-lg" data-download-link href="https://github.com/Artbyo3/Porta/releases/download/v1.0.0/Porta-v1.0.0.zip">
-            <span>Download ZIP (<span data-download-size>16.2 MB</span>)</span>
-          </a>
-          <a class="btn" data-checksum-link href="https://github.com/Artbyo3/Porta/releases/download/v1.0.0/SHA256SUMS.txt">
-            SHA256SUMS.txt
-          </a>
-        </div>
-      </div>
-
-      <div class="verify-grid">
-        <div class="code-box">
-          <h3>Verify checksum</h3>
-          <p>Compare your download against <a data-checksum-link href="https://github.com/Artbyo3/Porta/releases/download/v1.0.0/SHA256SUMS.txt">SHA256SUMS.txt</a>:</p>
-          <div class="cmd-row">
-            <code id="cmdWinHash">certutil -hashfile <span data-zip-name>Porta-v1.0.0.zip</span> SHA256</code>
-            <button type="button" class="btn btn-sm" data-copy-target="cmdWinHash">Copy</button>
-          </div>
-          <div class="cmd-row">
-            <code id="cmdLinuxHash">sha256sum -c SHA256SUMS.txt</code>
-            <button type="button" class="btn btn-sm" data-copy-target="cmdLinuxHash">Copy</button>
-          </div>
-        </div>
-
-        <div class="code-box">
-          <h3>Build from source</h3>
-          <p>Requires <a href="https://go.dev/dl/" target="_blank" rel="noopener">Go 1.27</a> or newer — no Node, npm, or C compiler needed:</p>
-          <div class="cmd-row">
-            <code id="cmdBuildSh">sh build.sh</code>
-            <button type="button" class="btn btn-sm" data-copy-target="cmdBuildSh">Copy</button>
-          </div>
-          <div class="cmd-row">
-            <code id="cmdBuildPs">powershell -ExecutionPolicy Bypass -File build.ps1</code>
-            <button type="button" class="btn btn-sm" data-copy-target="cmdBuildPs">Copy</button>
-          </div>
-        </div>
+      <h2>Download Porta <span data-release-version>v1.0.0</span></h2>
+      <p>Free for Windows and Linux. Nothing to install and no account needed. Mac is not supported yet.</p>
+      <div class="download-actions">
+        <a class="btn btn-primary btn-lg" data-download-link href="https://github.com/Artbyo3/Porta/releases/download/v1.0.0/Porta-v1.0.0.zip">
+          <span>Download Porta (<span data-download-size>16.2 MB</span>)</span>
+        </a>
       </div>
     </section>
   </main>
@@ -264,13 +225,13 @@
       <div class="footer-links">
         <strong>Porta</strong>
         <a href="https://github.com/Artbyo3/Porta" target="_blank" rel="noopener">GitHub</a>
-        <a data-release-notes href="https://github.com/Artbyo3/Porta/releases/latest" target="_blank" rel="noopener">Releases</a>
+        <a data-release-notes href="https://github.com/Artbyo3/Porta/releases/latest" target="_blank" rel="noopener">All releases</a>
         <a href="https://github.com/Artbyo3/Porta/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
       </div>
       <p class="footer-attrib">
-        Source code under the MIT License. Background grass image from
+        Background photo:
         <a href="https://pixabay.com/videos/grass-dew-field-fog-morning-66810/" target="_blank" rel="noopener">"Grass, dew, field" by JustYøu on Pixabay</a>
-        under the <a href="https://pixabay.com/service/license-summary/" target="_blank" rel="noopener">Pixabay Content License</a> (not covered by MIT).
+        (<a href="https://pixabay.com/service/license-summary/" target="_blank" rel="noopener">Pixabay Content License</a>).
       </p>
     </div>
   </footer>
